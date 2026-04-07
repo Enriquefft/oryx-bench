@@ -1,0 +1,107 @@
+# overlay/features.toml — declarative QMK features for the example project
+#
+# This is Tier 1 of the four-tier authoring model. Everything here is
+# generated into C code by `oryx-bench build`. You never see the generated
+# C unless you run `oryx-bench build --emit-overlay-c`.
+#
+# Layer references in this file use the LAYER NAMES from your Oryx layout
+# (Main, Sym+Num, Brd+Sys, Gaming), not integer indices. The build resolves
+# names → integers using the canonical layout. If you rename a layer in
+# Oryx and forget to update this file, lint catches it via the
+# `overlay-dangling-position` rule.
+
+# ─────────────────────────────────────────────────────────────────────────
+# Global tunables (compiled into config.h)
+# ─────────────────────────────────────────────────────────────────────────
+[config]
+tapping_term_ms         = 220     # default 200 was too tight for thumb mod-taps
+permissive_hold         = false   # achordion does the disambiguation; permissive_hold conflicts
+hold_on_other_key_press = false
+
+# ─────────────────────────────────────────────────────────────────────────
+# Achordion — the canonical fix for the LT-on-Backspace footgun
+# ─────────────────────────────────────────────────────────────────────────
+#
+# This layout has two layer-taps on high-frequency keys (caught by lint as
+# `lt-on-high-freq`):
+#
+#   R_thumb_outer  →  tap=KC_BSPC, hold=MO(Sym+Num)  = LT(Sym+Num, KC_BSPC)
+#   L_pinky_num    →  tap=KC_DEL,  hold=MO(Brd+Sys)  = LT(Brd+Sys, KC_DEL)
+#
+# Without achordion, fast Backspace bursts trigger spurious layer
+# activations and brief Sym+Num accesses inject stray Backspaces into
+# typed text. With achordion + opposite-hands strategy, the layer-tap
+# only resolves as HOLD if the next key is on the opposite half of the
+# keyboard. Same-hand follow-ups force a tap. This fix preserves the
+# visual layout in Oryx unchanged.
+#
+[achordion]
+enabled        = true
+chord_strategy = "opposite_hands"   # opposite_hands | always | never
+
+# Tighter timeout for the high-frequency erase keys — gives up on the
+# "hold" interpretation faster than letters, because mistyping a hold
+# here costs you one stray keystroke that pollutes typed text.
+[[achordion.timeout]]
+binding = "LT(Sym+Num, BSPC)"
+ms      = 600
+
+[[achordion.timeout]]
+binding = "LT(Brd+Sys, DEL)"
+ms      = 600
+
+# Disable streak-chord disambiguation for the erase keys — we never want
+# them to chord on streak.
+[[achordion.no_streak]]
+binding = "LT(Sym+Num, BSPC)"
+
+[[achordion.no_streak]]
+binding = "LT(Brd+Sys, DEL)"
+
+# (No same_hand_allow entries needed for this layout — we want strict
+# opposite-hands for everything.)
+
+# ─────────────────────────────────────────────────────────────────────────
+# Key overrides — Shift+Backspace → Delete, Shift+Esc → ~
+# ─────────────────────────────────────────────────────────────────────────
+[[key_overrides]]
+mods  = ["LSHIFT"]
+key   = "BSPC"
+sends = "DELETE"
+
+[[key_overrides]]
+mods  = ["LSHIFT"]
+key   = "ESC"
+sends = "S(GRAVE)"     # produces a tilde on US layout
+
+# ─────────────────────────────────────────────────────────────────────────
+# Macros — none defined yet
+# ─────────────────────────────────────────────────────────────────────────
+# Example for when you want one:
+#
+# [[macros]]
+# name  = "CK_EMAIL"           # binds to USERnn in Oryx; oryx-bench picks the slot
+# sends = "you@example.com"
+
+# ─────────────────────────────────────────────────────────────────────────
+# Combos — none defined here. Prefer Oryx UI for combos when possible.
+# ─────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────
+# Per-key tapping term overrides
+# ─────────────────────────────────────────────────────────────────────────
+# Achordion handles most of this. Use these only when achordion's
+# opposite-hands rule is too strict for one specific key.
+#
+# [[tapping_term_per_key]]
+# binding = "LCTL_T(KC_A)"
+# ms      = 180
+
+# ─────────────────────────────────────────────────────────────────────────
+# Feature flags — what gets enabled in rules.mk
+# ─────────────────────────────────────────────────────────────────────────
+[features]
+key_overrides = true     # enables KEY_OVERRIDE_ENABLE
+combos        = false    # not needed for this layout
+caps_word     = false
+mouse_keys    = false

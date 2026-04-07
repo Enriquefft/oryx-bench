@@ -1,0 +1,26 @@
+# oryx-bench project configuration
+#
+# This is a real, complex layout: a Dvorak Voyager with home-row mods,
+# a symbol/numpad layer, a system layer, and a (currently unreachable)
+# gaming layer. It also contains the canonical LT-on-Backspace footgun
+# that the achordion overlay in this example fixes.
+
+[layout]
+# Find your hash in the Oryx URL: configure.zsa.io/voyager/layouts/<HASH>/...
+hash_id  = "yrbLx"
+geometry = "voyager"
+revision = "latest"          # always pull the live state
+
+[build]
+backend    = "auto"          # auto | native | docker | nix
+qmk_branch = "firmware24"    # which branch of zsa/qmk_firmware to build against
+
+[flash]
+backend = "auto"             # auto | wally | keymapp
+
+[lint]
+# Suppress noisy/intentional rule IDs here. Empty by default.
+ignore = []
+
+[render]
+default_layer = "Main"

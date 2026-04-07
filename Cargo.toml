@@ -1,0 +1,72 @@
+[workspace]
+members = [".", "xtask"]
+default-members = ["."]
+
+[package]
+name = "oryx-bench"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.78"
+authors = ["Enrique Flores"]
+license = "MIT"
+description = "A workbench for ZSA keyboard layouts: edit visually in Oryx (or skip it), declarative TOML for QMK features, Zig for advanced behavior, deterministic builds, designed for human + AI agent collaboration."
+homepage = "https://github.com/enriquefft/oryx-bench"
+repository = "https://github.com/enriquefft/oryx-bench"
+documentation = "https://github.com/enriquefft/oryx-bench/blob/main/ARCHITECTURE.md"
+readme = "README.md"
+keywords = ["keyboard", "qmk", "zsa", "oryx", "voyager"]
+categories = ["command-line-utilities", "hardware-support"]
+
+[[bin]]
+name = "oryx-bench"
+path = "src/main.rs"
+
+# === Planned dependencies (not added until M1 implementation begins) ===
+#
+# [dependencies]
+# clap               = { version = "4", features = ["derive", "wrap_help"] }
+# serde              = { version = "1", features = ["derive"] }
+# serde_json         = "1"
+# toml               = "0.8"
+# reqwest            = { version = "0.12", features = ["json", "blocking", "rustls-tls"], default-features = false }
+# anyhow             = "1"
+# thiserror          = "2"
+# tracing            = "0.1"
+# tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# directories        = "5"
+# sha2               = "0.10"
+# similar            = "2"        # M4: `oryx-bench diff`
+# console            = "0.15"     # terminal styling for the hand-rolled grid renderer
+# walkdir            = "2"
+# tempfile           = "3"
+# which              = "7"        # toolchain detection in `setup`
+# once_cell          = "1"        # for the position-name lookup table in geometry/
+# humantime          = "2"        # for `pulled-at` parsing
+#
+# # NOTE: deliberately omitted (decided during design review)
+# # tabled  — wrong shape for split-grid + thumb cluster; we hand-roll
+# # git2    — too heavy; we shell out to `git` via `util/git.rs`
+#
+# [build-dependencies]
+# # Nothing — we use `xtask` for code generation, not `build.rs`.
+# # Reasoning: `build.rs` cannot easily compile and execute downstream
+# # code (which is what we'd need to walk the lint rule registry and
+# # invoke clap to render markdown). The `cargo xtask` pattern moves this
+# # to a runtime binary that can call into the main crate.
+#
+# [dev-dependencies]
+# insta      = { version = "1", features = ["json"] }   # snapshot tests
+# assert_cmd = "2"
+# predicates = "3"
+# wiremock   = "0.6"             # mock GraphQL for pull tests
+# proptest   = "1"               # property tests for serde round-trips
+#
+# [profile.release]
+# lto           = true
+# codegen-units = 1
+# strip         = true
+#
+# # The xtask crate has its own [package] section in xtask/Cargo.toml.
+# # It depends on the main `oryx-bench` crate so it can call into
+# # `lint::rules::registry()` and `cli::Cli::command()` at runtime to
+# # render the skill reference files.
