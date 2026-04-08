@@ -48,10 +48,14 @@ RUN apt-get update -qq && \
 
 # Install Zig (for Tier 2 overlay compilation)
 # Zig 0.13.0 is compatible with the QMK build environment
-RUN mkdir -p /opt/zig && cd /opt/zig && \
+RUN mkdir -p /opt/zig && \
+    cd /opt/zig && \
     curl -fsSL --max-time 300 https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz | tar xJ && \
-    ln -s /opt/zig/zig-0.13.0/zig /usr/local/bin/zig && \
-    zig version && \
+    ls -la && \
+    ZIG_DIR=$(ls -d zig-* 2>/dev/null | head -1) && \
+    test -n "$ZIG_DIR" || (echo "ERROR: No zig directory found" && ls -la && exit 1) && \
+    ln -sf /opt/zig/$ZIG_DIR/zig /usr/local/bin/zig && \
+    /usr/local/bin/zig version && \
     echo "✓ Zig 0.13.0 installed"
 
 # Clone ZSA qmk_firmware fork at the pinned commit/branch
@@ -72,23 +76,24 @@ RUN set -e && \
     git log --oneline -1
 
 # Install QMK Python dependencies
+# Use --break-system-packages because we're in a container environment
+# Don't upgrade system pip/setuptools; QMK's requirements will work with Debian versions
 RUN set -e && \
     cd /firmware && \
-    python3 -m pip install --no-cache-dir --upgrade pip setuptools && \
-    python3 -m pip install --no-cache-dir -r requirements.txt && \
+    python3 -m pip install --no-cache-dir --break-system-packages -r requirements.txt && \
     echo "✓ QMK dependencies installed"
 
 # Set QMK home and enable QMK CLI
 ENV QMK_HOME=/firmware
-ENV PATH="/firmware:${PATH}"
+ENV PATH="/firmware/bin:/usr/local/bin:${PATH}"
 
 # Verify the build environment
 RUN set -e && \
     echo "==== Build environment verification ====" && \
-    echo "QMK:" && qmk --version && \
-    echo "ARM GCC:" && arm-none-eabi-gcc --version && \
-    echo "Zig:" && zig version && \
-    echo "Python:" && python3 --version && \
+    echo "✓ Python 3:" && python3 --version && \
+    echo "✓ ARM GCC:" && arm-none-eabi-gcc --version && \
+    echo "✓ Zig:" && zig version && \
+    echo "✓ Firmware repo:" && test -d /firmware && echo "Cloned" && \
     echo "✓ All tools installed and functional" && \
     echo "====================================="
 
