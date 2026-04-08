@@ -136,7 +136,7 @@ in
     # Optionally generate flash scripts
     environment.systemPackages =
       if cfg.enableFlashScripts then
-        (cfg.package) ++ [
+        [ cfg.package ] ++ [
           (pkgs.runCommandLocal "oryx-bench-flash-scripts" { } ''
             mkdir -p $out/bin
             ${concatStringsSep "\n" (
@@ -147,7 +147,7 @@ in
               ) cfg.keyboards
             )}
           '')
-        ])
+        ]
       else
         [ cfg.package ];
   };
