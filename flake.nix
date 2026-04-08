@@ -6,7 +6,12 @@
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      flake-utils,
+    }:
     let
       # Read the package metadata from Cargo.toml so the flake's
       # version always matches what cargo builds. Single source of
@@ -14,7 +19,8 @@
       cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
 
       # Helper to build oryx-bench for a given system
-      mkOryx = system:
+      mkOryx =
+        system:
         let
           pkgs = import nixpkgs { inherit system; };
         in
@@ -34,15 +40,8 @@
           };
         };
     in
-    {
-      # Support for `nix flake show` / `nix flake check`
-      nixosModules = {
-        default = import ./packaging/nix/module.nix;
-        oryx-bench = import ./packaging/nix/module.nix;
-      };
-
-      # Per-system outputs (dev shell, packages, apps)
-      outputs = flake-utils.lib.eachDefaultSystem (system:
+    flake-utils.lib.eachDefaultSystem (
+        system:
         let
           pkgs = import nixpkgs { inherit system; };
           oryx-bench = mkOryx system;
@@ -67,15 +66,17 @@
 
               # Python deps for `qmk` — used by the codegen round-trip
               # test when `qmk` is on PATH.
-              (python3.withPackages (ps: with ps; [
-                appdirs
-                hjson
-                jsonschema
-                milc
-                pygments
-                dotty-dict
-                pillow
-              ]))
+              (python3.withPackages (
+                ps: with ps; [
+                  appdirs
+                  hjson
+                  jsonschema
+                  milc
+                  pygments
+                  dotty-dict
+                  pillow
+                ]
+              ))
 
               # Zig for Tier 2 overlay code; available in the shell so
               # manual experiments match the docker image.
@@ -84,6 +85,9 @@
               # Flashing tools.
               # wally-cli is not currently in nixpkgs under that exact name;
               # users who need it can install via the ZSA installer.
+
+              # Git hooks
+              lefthook
             ];
 
             # Keep target/ out of the Nix store to allow incremental builds.
@@ -106,6 +110,11 @@
             program = "${oryx-bench}/bin/oryx-bench";
           };
         }
-      );
-    };
+      ) // {
+        # Support for `nix flake show` / `nix flake check`
+        nixosModules = {
+          default = import ./packaging/nix/module.nix;
+          oryx-bench = import ./packaging/nix/module.nix;
+        };
+      };
 }
