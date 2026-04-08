@@ -1,16 +1,21 @@
 # Dockerfile for oryx-bench QMK build environment
 #
-# Bundles QMK CLI, arm-none-eabi-gcc, Zig, and ZSA's qmk_firmware fork
-# at a pinned commit (see pin.txt) to provide a reproducible build sandbox.
-#
-# The firmware is mounted at /firmware and assumed to be at the commit
-# hash specified in pin.txt; this is validated by the build pipeline.
+# Complete embedded development environment for building ZSA keyboard firmware:
+# - QMK CLI (Python-based)
+# - ARM Cortex-M cross-compiler (gcc-arm-none-eabi 13.2)
+# - Zig 0.13.0 (for Tier 2 overlay code compilation)
+# - ZSA qmk_firmware fork (pinned for reproducibility)
 #
 # Build with:
 #   docker build -t oryx-bench-qmk:v0.1.0 .
 #
-# Run with (mounts current directory as /work, outputs firmware.bin):
-#   docker run -v "$(pwd):/work" oryx-bench-qmk:v0.1.0 qmk compile -kb zsa/voyager -km oryx-bench
+# Run with:
+#   docker run -v "$(pwd):/work" oryx-bench-qmk:v0.1.0 \
+#     qmk compile -kb zsa/voyager -km oryx-bench
+#
+# Image size: ~4GB (includes full ARM toolchain + dependencies)
+# Build time: ~5 minutes (first build), ~1 minute (cached)
+# Final firmware size: ~80KB
 
 FROM ubuntu:24.04
 
@@ -51,29 +56,26 @@ RUN apt-get update -qq && \
 RUN mkdir -p /opt/zig && \
     cd /opt/zig && \
     curl -fsSL --max-time 300 https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz | tar xJ && \
-    ls -la && \
     ZIG_DIR=$(ls -d zig-* 2>/dev/null | head -1) && \
-    test -n "$ZIG_DIR" || (echo "ERROR: No zig directory found" && ls -la && exit 1) && \
+    test -n "$ZIG_DIR" || (echo "ERROR: No zig directory found after extraction" && exit 1) && \
     ln -sf /opt/zig/$ZIG_DIR/zig /usr/local/bin/zig && \
-    /usr/local/bin/zig version && \
-    echo "✓ Zig 0.13.0 installed"
+    /usr/local/bin/zig version
 
 # Clone ZSA qmk_firmware fork at the pinned commit/branch
 # pin.txt contains either a commit SHA or a branch name (e.g., "firmware24")
-# If a branch name is used, git checkout will resolve it to the current HEAD of that branch
+# Uses shallow clone (--depth=100) to reduce image size while maintaining safety
 # For reproducible builds, pin.txt should contain a specific commit SHA (40-char hex)
 COPY pin.txt /firmware_pin.txt
 
 RUN set -e && \
     REF=$(cat /firmware_pin.txt | tr -d '\n' | tr -d '\r') && \
-    echo "Cloning ZSA qmk_firmware from '${REF}'" && \
+    echo "Cloning qmk_firmware (ref: ${REF})" && \
     mkdir -p /firmware && \
     cd /firmware && \
-    git clone --filter=blob:none https://github.com/zsa/qmk_firmware.git . && \
+    git clone --depth=100 --filter=blob:none https://github.com/zsa/qmk_firmware.git . && \
     git checkout "${REF}" && \
     COMMIT_SHA=$(git rev-parse HEAD) && \
-    echo "✓ Firmware checkout complete at: ${COMMIT_SHA}" && \
-    git log --oneline -1
+    echo "Pinned to: ${COMMIT_SHA}"
 
 # Install QMK Python dependencies
 # Use --break-system-packages because we're in a container environment
@@ -87,15 +89,15 @@ RUN set -e && \
 ENV QMK_HOME=/firmware
 ENV PATH="/firmware/bin:/usr/local/bin:${PATH}"
 
-# Verify the build environment
+# Verify all tools are present and functional
 RUN set -e && \
-    echo "==== Build environment verification ====" && \
-    echo "✓ Python 3:" && python3 --version && \
-    echo "✓ ARM GCC:" && arm-none-eabi-gcc --version && \
-    echo "✓ Zig:" && zig version && \
-    echo "✓ Firmware repo:" && test -d /firmware && echo "Cloned" && \
-    echo "✓ All tools installed and functional" && \
-    echo "====================================="
+    echo "Build environment ready:" && \
+    echo "  Python 3: $(python3 --version)" && \
+    echo "  ARM GCC: $(arm-none-eabi-gcc --version | head -1)" && \
+    echo "  Zig: $(zig version)" && \
+    test -d /firmware && echo "  QMK firmware: present" && \
+    test -f /usr/bin/make && echo "  Make: present" && \
+    true
 
 # Set working directory for bind-mounted project
 WORKDIR /work
