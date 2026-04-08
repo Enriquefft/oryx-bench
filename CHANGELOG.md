@@ -9,6 +9,120 @@ Pre-1.0: minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+### Fixed (production-blocker: live Oryx GraphQL `combos` schema mismatch — task #66)
+
+Discovered during P2.3 testing: any real `oryx-bench pull` against
+`oryx.zsa.io` was failing because the live 2026-Q2 Oryx schema
+changed `combos` from a scalar to an object type requiring a
+sub-selection. Our `FULL_QUERY` requested bare `combos`, the server
+responded with `Field must have selections (field 'combos' returns
+Combo but has no selections)`, and the entire pull pipeline halted.
+**v0.1 could not ship until this was fixed.**
+
+A worktree-isolated investigation agent introspected the live
+schema and confirmed the new `Combo` shape:
+
+```graphql
+Combo { keyIndices: [Int!]!, layerIdx: Int!, name: String!, trigger: Json! }
+```
+
+Spot-checked `Layout` and `Revision` for further drift; only
+`combos` had changed. Every other field we currently select still
+exists.
+
+**Schema:**
+- `src/pull/graphql.rs::FULL_QUERY` — `combos` line replaced with a sub-selection requesting `keyIndices`, `layerIdx`, and `trigger`. `name` is deliberately omitted: no downstream consumer reads it. Each field has an inline comment naming the consumer that needs it (single source of truth: adding a new field to the query requires a corresponding use site).
+- `src/schema/oryx.rs::Combo` — promoted from a thin `serde_json::Value` to a typed struct with `key_indices: Vec<u8>`, `layer_idx: u8`, `trigger: serde_json::Value`, plus the existing `extra` round-trip bag. All fields are required (no `serde(default)`) so a missing field produces a loud parse error rather than a silent empty chord.
+- `src/schema/oryx.rs::Revision::combos` — changed from `Vec<Combo>` to `Option<Vec<Combo>>`. The live server returns `combos: null` (not `[]`) for combo-less layouts, and `#[serde(default)] Vec<Combo>` does NOT accept JSON `null`. The canonical converter normalizes `None` → empty list.
+- `src/schema/canonical.rs::oryx_combo_to_canonical` — rewritten to project a typed `Combo` into `CanonicalCombo`. Resolves `key_indices` to position-name strings via `Geometry::index_to_position`, looks up `layer_idx` against the revision's layer table, and runs `trigger` through `oryx_action_to_canonical` (single source of truth for keycode translation: the same function key actions go through). Every step propagates errors with context — out-of-range key index, unknown layer, malformed trigger — rather than silently dropping a combo.
+
+**Fixture:** `examples/voyager-dvorak/pulled/revision.json` previously omitted `combos` entirely. Added a single combo (indices 16/17 chord on layer 0 emitting `KC_ESCAPE`) so the existing wiremock + canonical tests exercise the new shape automatically.
+
+**New test:** `tests/pull_mock.rs::pull_now_round_trips_object_typed_combos` builds a minimal-but-realistic full-layout response inline (independent of the example fixture's evolution), mounts it on wiremock, runs `pull::pull_now`, then asserts the combo round-trips end-to-end:
+1. `oryx::Layout` deserializes `key_indices: [16, 17]` and `layer_idx: 0`
+2. `CanonicalLayout::from_oryx` produces exactly one combo
+3. Indices 16/17 → `["L_index_home", "L_inner_home"]` via the Voyager geometry
+4. `layer_idx: 0` → `Some("Main")`
+5. `trigger: { code: "KC_ESCAPE" }` → `sends: "KC_ESC"`
+
+This pins both the wire format AND the geometry/layer/action translation paths so a future Oryx schema change to any of those paths fires before it ships to production.
+
+### Fixed (`layerIdx` semantic ambiguity — investigation + hardening — task #70)
+
+After #66 landed, a focused investigation agent probed the live Oryx
+endpoint to resolve a follow-on semantic question: the schema models
+`Combo.layerIdx` as a non-null `Int!` without documenting whether it
+means **(A)** the 0-based array index into `revision.layers[]` as
+serialized, or **(B)** the layer's `position` field value. Our
+`oryx_combo_to_canonical` initially committed to interpretation B
+(`find(|(p, _)| *p == c.layer_idx)`).
+
+The investigation sampled multiple public Voyager layouts with
+non-empty combos (`z4A0O`, `XgYB9`, `alBEv`, others — including the
+11-layer `alBEv` with 14 combos referencing `layerIdx` up to 2).
+**Every public layout had `layers[i].position == i`**, making
+interpretations A and B observationally equivalent in practice. The
+verdict was UNRESOLVABLE from public data alone, but with strong
+corroborating evidence that Oryx normalizes `layers[]` to be
+position-sorted on serialization.
+
+To stay correct under either interpretation AND to detect a future
+schema divergence the moment it appears, `oryx_combo_to_canonical`
+now resolves `layerIdx` against **both** views via a new
+`resolve_combo_layer` helper with this decision matrix:
+
+| `by_position` | `by_array_idx` | Result                                          |
+|---------------|----------------|-------------------------------------------------|
+| `Some(p)`     | `Some(a)` p==a | `Ok(p)` — typical case, both interpretations agree |
+| `Some(p)`     | `Some(a)` p!=a | **`Err`** — schema divergence; refuse to guess  |
+| `Some(p)`     | `None`         | `Ok(p)` — only `position` matches               |
+| `None`        | `Some(a)`      | `Ok(a)` + `tracing::warn!` — fallback fired     |
+| `None`        | `None`         | `Err` — combo points at nothing                 |
+
+The disagreement branch is the load-bearing one: the moment Oryx
+ships a layout where `layers[i].position != i` AND the difference
+matters for some combo's `layerIdx`, the build fails with a precise
+error citing both candidate layer names — the user files an issue
+rather than silently flashing a combo on the wrong layer. The
+fallback branch logs a warning so a less-severe divergence (only
+array-index works) is also visible without breaking the build.
+
+5 new unit tests pin every branch of the decision matrix:
+- `resolve_combo_layer_typical_case_position_eq_array_index` — both agree
+- `resolve_combo_layer_disagreement_errors_loudly` — different layer names
+- `resolve_combo_layer_only_position_matches` — uses position
+- `resolve_combo_layer_only_array_index_matches` — fallback + warn
+- `resolve_combo_layer_neither_matches_errors` — "matches neither" error
+
+### Fixed (Phase 2 second post-review pass — 14 reviewer findings)
+
+After the first post-review pass landed, a second strict reviewer
+agent ran against P2.5–P2.9 plus the first post-review's own work.
+Returned NEEDS FIXES with 4 critical bugs, 5 important gaps, and 5
+nits. All 14 fixed in 4 batches.
+
+**Critical correctness bugs:**
+- **`escape_c_string` `\xNN` greediness.** C's `\x` escape is greedy and consumes any following hex digits without bound, so `"\x07A"` would parse as one character with value `0x7A`, silently dropping the BEL we meant to escape. Fixed by emitting `\xNN""` (the trailing empty string concatenates at C translation phase 6 per ISO C99 6.4.4.4 ¶7 and breaks the hex run, while leaving the resulting string identical at runtime). 3 new regression tests cover the bug, including the hex-letter-after-control-char case that the original test missed.
+- **`CanonicalAction::Custom(u8)` had no upper bound.** `u8` allowed 0..255 but QMK only declares `USER00..USER31` (32 slots) in `keycodes.h`. A `Custom(42)` reaching codegen would emit `USER42` which would fail to link with a confusing `arm-none-eabi-ld: undefined reference` deep inside the QMK build. New `MAX_USER_KEYCODE_SLOT = 31` const enforced by both parsers (`oryx_action_to_canonical` and `schema::layout::parse_action`) — out-of-range values fall through to `Keycode::Other` so the `unknown-keycode` lint catches them at the user's first lint run instead of producing a silent codegen drop or a broken QMK build. Codegen also defends with a loud error if a `Custom(n > 31)` somehow reaches it (defense in depth). 5 new tests cover both parsers and the codegen error path.
+- **`extract_user_tokens` missing trailing-boundary check.** The scanner extracted `USER01` from `USER1USER2` (one identifier in C/Zig) and `USER05` from `USER05suffix`. Fixed with a right-boundary check (`!is_ident_byte(bytes[j])`) symmetric to the existing left-boundary check on `MY_USER00`. The loop bound `<` was also corrected to `<=` so a file ending in exactly `USER05` (no trailing whitespace) is still scanned. 5 new regression tests pin both the rejected-concatenation cases AND the now-working short-file case.
+- **`commands/detach.rs` data loss + silenced rollback failure.** `detach` called `atomic_write(&target, ...)` unconditionally, silently destroying any pre-existing user-authored `layout.toml` (for example, a draft for a future detach, or a reference layout). The rollback path `let _ = remove_file(&target)` also swallowed errors entirely, so the user got no signal if cleanup failed. Fixed: `detach` now bails *before* writing if `target.exists()` (refuses to clobber); the rollback path uses `eprintln!` to surface its own failures. New `tests/attach_detach.rs::detach_refuses_to_clobber_existing_layout_toml` integration test pins the new behavior.
+
+**Important gaps:**
+- **`WARNING_HEADROOM_BYTES = 4 KB` doesn't scale across board sizes.** On a hypothetical 16 MB future board the rule would fire only at 99.97% — way too late to be useful. Replaced with `max(WARNING_HEADROOM_FLOOR_BYTES = 4 KB, budget / WARNING_HEADROOM_DIVISOR = 16)` so the warning fires at ~93.75% on small boards (Voyager: 64 KB → 4 KB headroom) AND large boards (16 MB → 1 MB headroom). Comments document why each constant was chosen.
+- **`KbToml::validate()` only checked sync rate limits.** Now also validates `layout.geometry` against `geometry::is_known()` (typos surface immediately at `Project::load_at` time with the supported list) AND the mode mutex (`hash_id` xor `[layout.local]` — both-set or neither-set are rejected). Without these guards, a typo in `geometry = "voyger"` propagated to the first command that called `geometry::get(...)`, producing a different error message at every call site (`build`, `flash`, `lint`, `show`, `find`, `explain`). 4 new tests pin each branch.
+- **`init` template round-trip tests were tautological.** They asserted `parsed.build.backend == BuildBackend::default()`, which would still hold if a future PR changed both the default AND the rendered template — defeating the regression-protection goal. Replaced with literal-variant assertions (`BuildBackend::Docker`, `AutoPull::OnRead`) AND raw-string assertions on the rendered TOML (`raw.contains(r#"backend = "docker""#)`, etc.). A future change that drops the line entirely or changes the value now fails the test loudly.
+- **`commands/diff.rs::git_show` collapsed three failure modes** ("ref doesn't exist", "object doesn't exist at ref", "git internal error") into `Ok(None)`. A user typo like `oryx-bench diff HAED` would silently show "no changes" instead of "unknown revision". Fixed by adding `git rev-parse --verify <ref>^{commit}` as a step-1 ref-validity probe (locale-independent exit code) and `git cat-file -t` as a type check (so a path pointing at a directory doesn't get parsed as TOML). Three distinct failure modes now produce three distinct user-facing errors.
+- **`flash::project_geometry` half-done dedup.** The helper was added in the first post-review pass but only used in `run`; `check_firmware_is_fresh` still re-implemented the same registry-lookup boilerplate. Now both call sites route through the helper.
+
+**Nits cleaned up:**
+- `extract_user_tokens` loop bound `< → <=` (covered above as part of the boundary fix).
+- `Environment` trait generalized from `wally_on_path()` to `binary_on_path(&str)` so adding a future probe (e.g. `dfu-util` for an alternate backend) doesn't grow the trait. `StubEnv` fixture now uses `HashSet<&'static str>` and a `with_wally(bool)` constructor for ergonomics.
+- `render_toml_value` String escaping: extracted `escape_c_config_string` helper so a user-supplied `[config] manufacturer = "My \"Cool\" Co"` produces a properly-escaped `#define MANUFACTURER "My \"Cool\" Co"` instead of malformed C (or worse, injected preprocessor tokens). 2 new tests, including the same `\xNN""` boundary discipline as the SEND_STRING escaper.
+- `BACKOFF_SHIFT_CAP = 6` const + `const _: () = assert!(MAX_ATTEMPTS - 1 <= BACKOFF_SHIFT_CAP)` — a future `MAX_ATTEMPTS` bump trips the assertion at compile time instead of silently flatlining backoff at `2^6 * BACKOFF_BASE`.
+- `unused_feature_flag::flag_is_unused` docstring now explicitly documents the "unknown flag silently accepted" gap as intentional, with a pointer to a future `unknown-feature-flag` lint that would close it.
+
+**Test count: 262** (started at 169 pre-Phase-2; +93 across all Phase 2 work and three review passes). Clippy clean. Fmt clean. `cargo test --workspace` green from a fresh checkout.
+
 ### Fixed (Phase 2 post-review pass — 22 reviewer findings)
 
 After Phase 2 landed, a strict reviewer agent ran against P2.1–P2.4

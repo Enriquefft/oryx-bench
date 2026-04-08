@@ -557,10 +557,7 @@ fn oryx_combo_to_canonical(
 /// | Some(p)     | None         | `Ok(p)` — only `position` matches              |
 /// | None        | Some(a)      | `Ok(a)` + tracing::warn — fallback fired       |
 /// | None        | None         | `Err(...)` — combo points at nothing           |
-fn resolve_combo_layer(
-    layer_idx: u8,
-    layer_index_to_name: &[(u8, String)],
-) -> Result<String> {
+fn resolve_combo_layer(layer_idx: u8, layer_index_to_name: &[(u8, String)]) -> Result<String> {
     let by_position = layer_index_to_name
         .iter()
         .find(|(p, _)| *p == layer_idx)
@@ -890,5 +887,75 @@ mod tests {
             }
             other => panic!("expected Keycode::Other(USER42), got {other:?}"),
         }
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // resolve_combo_layer — pin all four discriminating cases of the
+    // `position` vs `array index` semantic ambiguity. See the doc on
+    // the helper for the decision matrix.
+    // ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn resolve_combo_layer_typical_case_position_eq_array_index() {
+        // The common case: every public Oryx layout has
+        // layers[i].position == i. Both interpretations agree.
+        let table = vec![
+            (0u8, "Main".to_string()),
+            (1u8, "Sym+Num".to_string()),
+            (2u8, "Brd+Sys".to_string()),
+        ];
+        assert_eq!(resolve_combo_layer(0, &table).unwrap(), "Main");
+        assert_eq!(resolve_combo_layer(1, &table).unwrap(), "Sym+Num");
+        assert_eq!(resolve_combo_layer(2, &table).unwrap(), "Brd+Sys");
+    }
+
+    #[test]
+    fn resolve_combo_layer_disagreement_errors_loudly() {
+        // Hypothetical future Oryx schema where layers are NOT in
+        // position order. layers[1] has position=5, so layer_idx=1
+        // resolves to "Beta" by array index but "Alpha" by position
+        // (because Alpha has position=1 at array index 0). The two
+        // interpretations disagree → error loudly so the bug surfaces
+        // immediately instead of silently flashing the wrong layer.
+        let table = vec![
+            (1u8, "Alpha".to_string()), // array_idx 0, position 1
+            (5u8, "Beta".to_string()),  // array_idx 1, position 5
+            (2u8, "Gamma".to_string()), // array_idx 2, position 2
+        ];
+        let err = resolve_combo_layer(1, &table).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("ambiguous"), "expected ambiguity error: {msg}");
+        assert!(msg.contains("Alpha"));
+        assert!(msg.contains("Beta"));
+    }
+
+    #[test]
+    fn resolve_combo_layer_only_position_matches() {
+        // layer_idx=5 matches a position but no array index (only 2
+        // layers total). Returns the position match.
+        let table = vec![(5u8, "Alpha".to_string()), (3u8, "Beta".to_string())];
+        assert_eq!(resolve_combo_layer(5, &table).unwrap(), "Alpha");
+    }
+
+    #[test]
+    fn resolve_combo_layer_only_array_index_matches() {
+        // layer_idx=1 matches array index 1 ("Beta") but no layer has
+        // position == 1. Returns the array-index fallback (and emits
+        // a tracing::warn at runtime, exercising the code path).
+        let table = vec![
+            (10u8, "Alpha".to_string()), // array_idx 0, position 10
+            (20u8, "Beta".to_string()),  // array_idx 1, position 20
+        ];
+        assert_eq!(resolve_combo_layer(1, &table).unwrap(), "Beta");
+    }
+
+    #[test]
+    fn resolve_combo_layer_neither_matches_errors() {
+        // layer_idx=99 matches neither a position nor an array index.
+        let table = vec![(0u8, "Main".to_string()), (1u8, "Sym+Num".to_string())];
+        let err = resolve_combo_layer(99, &table).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("99"), "expected 99 in error: {msg}");
+        assert!(msg.contains("matches neither"));
     }
 }
