@@ -4,7 +4,11 @@ This document is the canonical design reference. Read it before contributing
 or proposing changes. It is also the document Claude Code reads when working
 on the codebase.
 
-> **Status**: design phase. No code yet. This doc supersedes earlier drafts.
+> **Status**: v0.1.0 implemented. Voyager-only, Docker build backend.
+> See [`CHANGELOG.md`](CHANGELOG.md) for what's actually shipped.
+> Sections in this doc that describe v0.2+ features (Moonlander/Ergodox
+> geometries, native/nix backends, SVG rendering, `oryx-bench live`,
+> `oryx-bench tui`) are forward-looking design notes, not current code.
 
 ## What this tool is
 
@@ -342,7 +346,7 @@ oryx-bench/
 │   │   ├── explain.rs
 │   │   ├── find.rs
 │   │   ├── lint.rs
-│   │   ├── diff.rs                    # M4
+│   │   ├── diff.rs                    # semantic diff vs git ref
 │   │   ├── build.rs
 │   │   ├── flash.rs                   # supports --dry-run, --yes
 │   │   ├── status.rs
@@ -367,11 +371,11 @@ oryx-bench/
 │   │   ├── keymap.rs                  # the LAYOUT() emitter
 │   │   ├── features.rs                # features.toml → C source
 │   │   ├── config_h.rs                # config.h emitter
-│   │   └── rules_mk.rs                # rules.mk emitter (handles SRC += for overlay/*.{c,zig})
+│   │   └── rules_mk.rs                # rules.mk emitter (SRC += for overlay/*.c; Zig wiring is v0.2+)
 │   ├── render/
 │   │   ├── mod.rs
-│   │   ├── ascii.rs                   # hand-rolled split-grid renderer (NOT tabled)
-│   │   └── svg.rs                     # subprocess wrapper for keymap-drawer
+│   │   └── ascii.rs                   # hand-rolled split-grid renderer (NOT tabled)
+│   │   # svg.rs (keymap-drawer subprocess wrapper) is v0.2+ — not in v0.1.
 │   ├── lint/
 │   │   ├── mod.rs                     # rule runner, Issue type
 │   │   └── rules/                     # one file per rule (extension point)
@@ -846,10 +850,11 @@ The Voyager's split-grid-with-thumb-cluster shape doesn't fit `tabled`'s
 rectangular model and would force a fight against the library. ~80 lines
 of straightforward formatting code with `console` for ANSI styling.
 
-SVG rendering shells out to `keymap-drawer`. The path is: convert our
-`CanonicalLayout` into keymap-drawer's YAML format, write to a temp
-file, invoke `keymap-drawer draw`, capture the SVG. Single subprocess
-per render.
+SVG rendering is planned for v0.2+ and will shell out to
+`keymap-drawer`. The path will be: convert our `CanonicalLayout` into
+keymap-drawer's YAML format, write to a temp file, invoke
+`keymap-drawer draw`, capture the SVG. Single subprocess per render.
+Not wired in v0.1 — `render::ascii` is the only backend.
 
 ### `src/lint/rules/` — the lint extension point
 
@@ -881,7 +886,7 @@ with **docker only**. Reasoning: every install path (Mac, Linux, NixOS)
 already has docker as a viable install. The bundled image
 (`ghcr.io/enriquefft/oryx-bench-qmk:<sha>`) is one thing to maintain,
 one set of bug reports, one reproducibility story. Native and nix
-backends are M5+ work.
+backends are tracked for a future release.
 
 The Docker image contents are pinned and documented in
 `packaging/docker/README.md`:
@@ -976,7 +981,7 @@ revision = "latest"         # or a specific revision hash to pin
 file = "layout.toml"        # path relative to project root
 
 [build]
-backend    = "docker"       # v0.1: docker only. v0.2+: also "native", "nix"
+backend    = "docker"       # v0.1: docker (or "auto", which resolves to docker)
 qmk_pin    = "auto"         # "auto" uses the docker image's bundled fork; or a commit SHA
 zig_pin    = "auto"         # same — pinned per docker image release
 
@@ -1025,7 +1030,7 @@ This is oryx-bench 0.5.0 (qmk firmware25). The QMK ecosystem may have
 changes that affect your overlay. Run `oryx-bench upgrade-check` to scan.
 ```
 
-`oryx-bench upgrade-check` (M4 work) re-runs lint with the new keycode
+`oryx-bench upgrade-check` re-runs lint with the new keycode
 catalog, surfaces any new rules, and checks for keycodes that have been
 renamed or removed.
 
@@ -1176,50 +1181,55 @@ position = 0
 # Keys are addressed by symbolic position name. Any position you don't
 # specify defaults to KC_NO. Use `inherit = "<layer>"` to default to
 # transparent fall-through instead.
-keys = {
-  L_pinky_num   = { tap = "DEL",  hold = "MO(System)" },
-  L_pinky_top   = "1",
-  L_ring_top    = "QUOTE",
-  L_middle_top  = "COMMA",
-  L_index_top   = "DOT",
-  L_inner_top   = "P",
-  L_inner2_top  = "Y",
-  L_pinky_home  = { hold = "LSHIFT" },
-  L_ring_home   = "A",
-  # ... etc, one entry per position you want bound
-  R_thumb_inner = { tap = "ENTER", hold = "LALT" },
-  R_thumb_outer = { tap = "BSPC",  hold = "MO(SymNum)" },
-}
+#
+# Position naming is column-first: <HAND>_<COL>_<ROW> where COL is one
+# of outer/pinky/ring/middle/index/inner and ROW is one of
+# num/top/home/bottom. The "outer" column is the leftmost extension on
+# the left half (and the rightmost on the right half).
+[layers.keys]
+L_outer_num   = { tap = "DEL",  hold = "MO(System)" }
+L_pinky_num   = "1"
+L_ring_num    = "2"
+L_outer_top   = "LGUI"
+L_pinky_top   = "QUOTE"
+L_ring_top    = "COMMA"
+L_middle_top  = "DOT"
+L_index_top   = "P"
+L_inner_top   = "Y"
+L_outer_home  = { hold = "LSHIFT" }
+L_pinky_home  = "A"
+# ... etc, one entry per position you want bound
+R_thumb_inner = { tap = "ENTER", hold = "LALT" }
+R_thumb_outer = { tap = "BSPC",  hold = "MO(SymNum)" }
 
 # ── Layer 1: SymNum (overlay) ──────────────────────────────────────────
 [[layers]]
 name = "SymNum"
 position = 1
 inherit = "Main"            # KC_TRNS by default; only override what differs
-keys = {
-  L_pinky_num   = "TAB",
-  R_pinky_home  = "MINUS",
-  R_index_home  = "5",
-  # ...
-}
+[layers.keys]
+L_outer_num   = "TAB"
+R_pinky_home  = "MINUS"
+R_index_home  = "5"
+# ...
 
 # ── Layer 2: System (overlay) ──────────────────────────────────────────
 [[layers]]
 name = "System"
 position = 2
 inherit = "Main"
-keys = { /* ... */ }
+[layers.keys]
+# ...
 
 # ── Layer 3: Gaming (overlay, currently unreachable) ───────────────────
 [[layers]]
 name = "Gaming"
 position = 3
 inherit = "Main"            # was the bug — original Oryx had KC_NO here
-keys = {
-  L_index_top  = "Q",
-  L_middle_top = "W",
-  # ...
-}
+[layers.keys]
+L_index_top  = "Q"
+L_middle_top = "W"
+# ...
 # Lint will flag this layer as unreachable until you bind a key to enter it.
 ```
 
@@ -1229,13 +1239,14 @@ Authoring 52 keys × 4 layers in TOML by hand is real work. We mitigate:
 
 - `inherit = "Main"` defaults all unspecified positions to `KC_TRNS` so
   overlay layers only need to mention the *differences*
-- Position names are stable across geometries (`L_pinky_home`, etc.) so
-  you only learn one vocabulary
+- Position names are stable across geometries (column-first:
+  `<HAND>_<COL>_<ROW>` where COL ∈ outer/pinky/ring/middle/index/inner
+  and ROW ∈ num/top/home/bottom) so you only learn one vocabulary
 - The compact form `L_pinky_top = "1"` for plain keys keeps line count
   manageable
 - `oryx-bench show` renders the result to ASCII so you can verify each
   edit visually
-- A future `oryx-bench tui` (M5+) could provide a small interactive grid
+- A future `oryx-bench tui` could provide a small interactive grid
   editor for users who really want one without a browser dependency
 
 For users who don't want to author by hand: use Oryx mode. Hand-edit
@@ -1245,25 +1256,29 @@ local mode is for power users who specifically want it.
 
 ## CLI command surface
 
-| Command | Milestone | Purpose |
-|---|---|---|
-| `oryx-bench setup` | M1 | Detect toolchain. No state changes. Idempotent. |
-| `oryx-bench init --hash <H>` | M1 | Create Oryx-mode project. |
-| `oryx-bench init --blank` | M1 | Create local-mode project (writes `layout.toml`). |
-| `oryx-bench pull` | M1 | Manually fetch Oryx state. (Usually unnecessary thanks to auto-pull.) |
-| `oryx-bench show [LAYER]` | M1 | Render a layer (or all) as ASCII split-grid. |
-| `oryx-bench explain POS` | M1 | Cross-layer view of a position. |
-| `oryx-bench find QUERY` | M1 | Search across layers. |
-| `oryx-bench lint [--strict]` | M1 | Static analysis. |
-| `oryx-bench status` | M1 | One-screen overview of project state, sync, build cache, lint. |
-| `oryx-bench skill install [--global]` | M1 | Install project-local Claude Code skill. |
-| `oryx-bench skill remove` | M1 | Uninstall the skill. |
-| `oryx-bench attach --hash <H>` | M2 | local mode → Oryx mode (overwrites local). |
-| `oryx-bench detach` | M2 | Oryx mode → local mode (one-way). |
-| `oryx-bench build [--dry-run]` | M2 | Compile firmware. |
-| `oryx-bench flash [--dry-run] [--yes]` | M3 | Flash firmware (requires explicit user approval). |
-| `oryx-bench diff [REF]` | M4 | Semantic diff vs git ref. |
-| `oryx-bench upgrade-check` | M4 | Re-run lint with the new keycode catalog after a tool update. |
+All v0.1 commands are implemented. The previous milestone column
+(M1–M4) has been removed; everything in the table below ships in
+v0.1.0.
+
+| Command | Purpose |
+|---|---|
+| `oryx-bench setup [--full]` | Detect toolchain. No state changes. Idempotent. |
+| `oryx-bench init --hash <H>` | Create Oryx-mode project. |
+| `oryx-bench init --blank` | Create local-mode project (writes `layout.toml`). |
+| `oryx-bench pull` | Manually fetch Oryx state. (Usually unnecessary thanks to auto-pull.) |
+| `oryx-bench show [LAYER]` | Render a layer (or all) as ASCII split-grid. |
+| `oryx-bench explain POS` | Cross-layer view of a position. |
+| `oryx-bench find QUERY` | Search across layers. |
+| `oryx-bench lint [--strict]` | Static analysis (21 rules). |
+| `oryx-bench status` | One-screen overview of project state, sync, build cache, lint. |
+| `oryx-bench skill install [--global]` | Install project-local Claude Code skill. |
+| `oryx-bench skill remove` | Uninstall the skill. |
+| `oryx-bench attach --hash <H>` | local mode → Oryx mode (refuses on dirty git working tree without `--force`). |
+| `oryx-bench detach` | Oryx mode → local mode (one-way). |
+| `oryx-bench build [--dry-run]` | Compile firmware via the Docker backend. |
+| `oryx-bench flash [--dry-run] [--yes] [--force]` | Flash firmware (requires explicit user approval). Refuses to flash a stale build unless `--force`. |
+| `oryx-bench diff [REF]` | Semantic diff vs git ref. |
+| `oryx-bench upgrade-check` | Re-run lint with the current keycode catalog after a tool update. |
 
 ### Init command spec
 
@@ -1495,7 +1510,7 @@ not Oryx-required.**
 
 ---
 
-## What's deferred to v0.2+
+## What's tracked for a future release
 
 Explicitly cut from v0.1 to ship faster:
 
@@ -1511,30 +1526,31 @@ Explicitly cut from v0.1 to ship faster:
 - **A `cargo xtask gen-fixture <hash>`** convenience for downloading test
   fixtures.
 
-What ships in v0.1 (M1–M3):
+What ships in v0.1.0:
 
-- M1: setup, init (both modes), pull, show, explain, find, lint, status,
-  skill install/remove, auto-pull cache
-- M2: attach, detach, build (docker only), all generators (keymap,
-  features, config, rules)
-- M3: flash (wally + Keymapp fallback), --dry-run, --yes
-- M4 (post-v0.1 polish): diff, upgrade-check, more lint rules
+- Read-side: setup, init (both modes), pull, show, explain, find,
+  lint, status, skill install/remove, auto-pull cache
+- Write-side: attach, detach, build (docker only), all generators
+  (keymap, features.c, features.h, config.h, rules.mk)
+- Hardware: flash (wally + Keymapp fallback), --dry-run, --yes,
+  --force; build-freshness check refuses stale flashes
+- Polish: diff (semantic vs git ref), upgrade-check, 21 lint rules
 
 ---
 
 ## Open questions
 
-These remain undecided and are not blockers for M1 to begin:
+These remain undecided as of v0.1.0:
 
 1. **Should the `xtask gen-skill-docs` output also include a versioned
    change log so users can see what's new in `lint-rules.md` between
-   releases?** Lean yes, defer to M4.
+   releases?** Lean yes; tracked for a future release.
 2. **Should `init` accept a `--from <other-project>` flag** to bootstrap
    from a sibling project's overlay/ directory? Useful for users with
    multiple keyboards. Defer to v0.2.
 3. **Should we ship a JSON-output flag (`--json`) on every read command**
    for programmatic use (especially by Claude Code)? Probably yes, defer
-   to early M2 once the schemas are stable.
+   to a future release.
 4. **Should we publish a public Oryx layout that users can fork** as the
    "starter template" for an oryx-bench-friendly layout? Low cost; defer
    until we have v0.1 users to ask.

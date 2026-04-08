@@ -3783,6 +3783,22 @@
           }
         ]
       }
+    ],
+    "combos": [
+      {
+        "keyIndices": [16, 17],
+        "layerIdx": 0,
+        "name": "esc-combo",
+        "trigger": {
+          "code": "KC_ESCAPE",
+          "color": null,
+          "layer": null,
+          "macro": null,
+          "modifier": null,
+          "modifiers": null,
+          "description": null
+        }
+      }
     ]
   }
 }

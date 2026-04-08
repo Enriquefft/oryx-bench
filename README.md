@@ -4,9 +4,10 @@
 > at all), modern declarative config + Zig for advanced features, one-command
 > deterministic builds, designed to be driven by humans **and** by Claude Code.
 
-> ⚠️ **Status: design phase, v0.0.0.** Nothing on this page is installable yet.
-> The design spec is in [`ARCHITECTURE.md`](ARCHITECTURE.md). M1 implementation
-> begins after design review.
+> **Status: v0.1.0.** Voyager support, Docker build backend, wally-cli +
+> Keymapp flash, full lint suite. Moonlander/Ergodox geometries and
+> native+nix build backends are tracked for a future release. The full
+> design spec is in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## What it does
 
@@ -92,19 +93,29 @@ revision.
 The honest limit: persona 5 cannot push changes back to Oryx after
 detaching — Oryx has no public write API. We document this loudly.
 
-## Install (planned for v0.1)
+## Install
 
-`oryx-bench` will be one Rust binary, distributed via `cargo install`,
-Homebrew, Nix, AUR, and pre-built GitHub releases. The QMK build toolchain
-is bundled in a Docker image (`ghcr.io/enriquefft/oryx-bench-qmk:<tag>`)
-that includes `qmk` + `arm-none-eabi-gcc` + `zig` + the pinned ZSA fork.
+`oryx-bench` is one Rust binary. v0.1 supports the Docker build backend;
+the QMK build toolchain is pinned in a Docker image at
+`ghcr.io/enriquefft/oryx-bench-qmk:v<VERSION>` containing `qmk`,
+`arm-none-eabi-gcc`, `zig`, and the pinned ZSA fork.
 
-Native and Nix backends will land in v0.2; v0.1 ships docker-only for
-build (everything else works on every platform).
+```bash
+# Cargo (any platform)
+cargo install --locked oryx-bench
 
-For now: there's no install. The design is the deliverable.
+# Nix flake (Linux/macOS)
+nix run github:enriquefft/oryx-bench -- --help
 
-## Quickstart (once v0.1 ships)
+# From source
+git clone https://github.com/enriquefft/oryx-bench
+cd oryx-bench && cargo build --release
+```
+
+Native and Nix build backends are tracked for a future release;
+everything else works on every platform.
+
+## Quickstart
 
 **Oryx mode** (you have an existing Oryx layout):
 
@@ -152,22 +163,24 @@ my-voyager/
 
 In local mode, replace `pulled/` with `layout.toml`.
 
-## The 13 commands
+## The 15 commands
 
 | Command | What it does |
 |---|---|
-| `oryx-bench setup` | Detect toolchain (qmk, gcc-arm, zig, docker, wally-cli, keymapp). Idempotent. |
+| `oryx-bench setup [--full]` | Detect toolchain (qmk, gcc-arm, zig, docker, wally-cli, keymapp, kontroll). Idempotent. `--full` runs each tool's `--version` for debugging. |
 | `oryx-bench init` | Create project skeleton. `--hash` for Oryx mode, `--blank` for local mode. |
-| `oryx-bench attach --hash <H>` | Switch local-mode project to Oryx mode. |
-| `oryx-bench detach` | Switch Oryx-mode project to local mode. **One-way.** |
+| `oryx-bench attach --hash <H>` | Switch local-mode project to Oryx mode. Refuses without `--force` if `layout.toml` has uncommitted changes (or if the dir isn't a git repo). |
+| `oryx-bench detach [--force]` | Switch Oryx-mode project to local mode. **One-way.** |
 | `oryx-bench pull` | Manually fetch Oryx state. (Usually unnecessary thanks to auto-pull.) |
 | `oryx-bench show [LAYER]` | Render layer(s) as ASCII split-grid. Auto-pulls if stale. |
 | `oryx-bench explain POSITION` | Cross-layer view of one position. |
-| `oryx-bench find QUERY` | Search across layers (`KC_BSPC`, `layer:SymNum`, `hold:LSHIFT`, `anti:lt-on-high-freq`). |
-| `oryx-bench lint [--strict]` | Static analysis. |
+| `oryx-bench find QUERY` | Search across layers (`KC_BSPC`, `layer:SymNum`, `hold:LSHIFT`, `anti:lt-on-high-freq`, `position:R_thumb_outer`). |
+| `oryx-bench lint [--strict] [--rule ID] [--format text\|json]` | Static analysis with 21 lint rules. |
 | `oryx-bench status` | One-screen overview of project, sync, build cache, lint. |
-| `oryx-bench build [--dry-run]` | Compile firmware via the bundled Docker image. Cached. |
-| `oryx-bench flash [--dry-run] [--yes]` | Flash via wally-cli or Keymapp instructions. Requires explicit user approval. |
+| `oryx-bench build [--dry-run] [--emit-overlay-c]` | Compile firmware via the bundled Docker image. Cached. |
+| `oryx-bench flash [--dry-run] [--yes] [--force]` | Flash via wally-cli or Keymapp instructions. Refuses to flash a stale build unless `--force`. Requires explicit confirmation. |
+| `oryx-bench diff [REF] [--layer NAME]` | Semantic diff of the visual layout + overlay vs a git ref (default `HEAD`). |
+| `oryx-bench upgrade-check` | Re-run lint with the current keycode catalog after a tool upgrade. Surfaces uncatalogued keycodes. |
 | `oryx-bench skill install [--global]` | Install the project-local Claude Code skill. |
 
 ## Designed for Claude Code
@@ -212,26 +225,24 @@ Keymapp.
 
 ## Roadmap
 
-**M1** (the leverage milestone)
+**v0.1 (current release)** — Voyager-only, Docker build backend, full
+authoring + lint + flash surface:
+
 - `setup`, `init` (both modes), `pull`, `show`, `explain`, `find`, `lint`,
-  `status`, `skill install/remove`, auto-pull cache
+  `status`, `skill install/remove` (read-side surface)
+- `attach`, `detach`, `build` (docker), `flash` (wally + Keymapp fallback)
+- `diff` (semantic vs git ref), `upgrade-check` (re-lint after tool upgrade)
+- 21 lint rules including the LT-on-high-freq footgun, achordion + key-override
+  + combo + macro codegen, structural codegen round-trip test
 
-**M2**
-- `attach`, `detach`, `build` (docker only), all generators (keymap,
-  features, config, rules)
+**Future releases**
 
-**M3**
-- `flash` (wally + Keymapp fallback), `--dry-run`, `--yes`
-
-**M4** (post-v0.1 polish)
-- `diff` (semantic), `upgrade-check`, more lint rules
-
-**v0.2+**
 - Native and Nix build backends
-- Moonlander and Ergodox support
+- Moonlander and Ergodox geometries
 - `oryx-bench live` (layer state via kontroll/Keymapp gRPC)
 - `oryx-bench tui` (in-terminal layout editor for local mode)
 - User-defined lint rules
+- SVG rendering via keymap-drawer subprocess
 
 ## License
 
@@ -245,7 +256,7 @@ MIT. See [LICENSE](LICENSE).
   for proving the overlay-merge pattern works (we adapted the model for
   local CLI use instead of GitHub Actions).
 - [`caksoylar/keymap-drawer`](https://github.com/caksoylar/keymap-drawer)
-  for the SVG renderer we shell out to.
+  — planned SVG renderer integration (not yet wired up in v0.1).
 - [Achordion](https://getreuer.info/posts/keyboards/achordion/) by Pascal
   Getreuer — the bundled tap-hold disambiguation library.
 - The [QMK](https://qmk.fm/) and [Zig](https://ziglang.org/) projects.

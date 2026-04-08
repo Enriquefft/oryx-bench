@@ -26,7 +26,7 @@ hold_on_other_key_press = false
 # `lt-on-high-freq`):
 #
 #   R_thumb_outer  →  tap=KC_BSPC, hold=MO(Sym+Num)  = LT(Sym+Num, KC_BSPC)
-#   L_pinky_num    →  tap=KC_DEL,  hold=MO(Brd+Sys)  = LT(Brd+Sys, KC_DEL)
+#   L_outer_num    →  tap=KC_DEL,  hold=MO(Brd+Sys)  = LT(Brd+Sys, KC_DEL)
 #
 # Without achordion, fast Backspace bursts trigger spurious layer
 # activations and brief Sym+Num accesses inject stray Backspaces into

@@ -1,406 +1,437 @@
 # Command reference
 
 > **This file is GENERATED at build time** by the `xtask` binary from the
-> clap CLI definitions in `src/cli.rs`. The content below is the
-> design-phase manual draft; after M1, `cargo xtask gen-skill-docs` will
-> replace it with output identical in shape but generated from the same
-> source the binary parses arguments from. CI verifies the file is
+> clap CLI definitions in `src/cli.rs`. Do not edit by hand — run
+> `cargo xtask gen-skill-docs` to regenerate. CI verifies the file is
 > up-to-date.
 
 ---
 
-## `oryx-bench setup`
-
-Detect available toolchain (qmk, arm-none-eabi-gcc, zig, docker, wally-cli,
-keymapp, kontroll). Print a summary. Idempotent. Does **not** modify state.
+## `oryx-bench`
 
 ```
-oryx-bench setup [--verbose]
+Workbench for ZSA keyboard layouts — Oryx-friendly, not Oryx-required
+
+Usage: oryx-bench [OPTIONS] <COMMAND>
+
+Commands:
+  setup          Detect toolchain (qmk, gcc-arm, zig, docker, wally-cli, keymapp). Idempotent
+  init           Create a project skeleton
+  attach         Switch a local-mode project to Oryx mode
+  detach         Switch an Oryx-mode project to local mode. One-way
+  pull           Manually fetch live state from Oryx. Usually unnecessary thanks to auto-pull
+  show           Render a layer (or all) as an ASCII split-grid keyboard
+  explain        Cross-layer view of a single position
+  find           Search across all layers
+  lint           Run static analysis
+  status         One-screen overview of project, sync, and lint state
+  build          Compile firmware via the bundled Docker image
+  flash          Flash firmware to a connected keyboard
+  skill          Install / remove the project-local Claude Code skill
+  diff           Semantic diff vs git ref
+  upgrade-check  Re-run lint with the current keycode catalog. Use after `cargo install --force
+                 oryx-bench`
+  help           Print this message or the help of the given subcommand(s)
 
 Options:
-  --verbose, -v    Print full version output for each detected tool
-```
+      --project <PROJECT>
+          Path to the project root (default: discover from cwd)
 
-Use this to verify your environment before running `init` or `build`.
+      --color <COLOR>
+          Color mode
+          
+          [default: auto]
+          [possible values: auto, always, never]
 
----
+  -v, --verbose...
+          Increase logging verbosity (repeatable)
 
-## `oryx-bench init`
+  -h, --help
+          Print help
 
-Create a project skeleton in the current directory. Refuses to overwrite
-existing files unless `--force`.
+  -V, --version
+          Print version
 
-### Oryx mode
-
-```
-oryx-bench init --hash <HASH> [--geometry <G>] [--name <NAME>]
-
-Required:
-  --hash <HASH>          The Oryx layout hash, e.g. yrbLx
-                         Find it in the URL: configure.zsa.io/voyager/layouts/<HASH>/...
-
-Options:
-  --geometry <G>         voyager (default in v0.1)
-  --name <NAME>          Friendly project name (defaults to current dir basename)
-  --no-skill             Don't prompt to install the project-local Claude Code skill
-  --force                Overwrite existing files
-```
-
-Creates:
-
-```
-./kb.toml                            # with [layout] hash_id, geometry
-./pulled/                            # empty until first pull
-./overlay/README.md
-./overlay/features.toml              # empty stub
-./.gitignore
-```
-
-### Local mode
-
-```
-oryx-bench init --blank --geometry <G> [--name <NAME>]
-
-Required:
-  --blank                Use local mode (no Oryx hash)
-  --geometry <G>         voyager (v0.1 only)
-
-Options:
-  --name <NAME>
-  --no-skill
-  --force
-```
-
-Creates:
-
-```
-./kb.toml                            # with [layout.local] file = "layout.toml"
-./layout.toml                        # empty layout with one base layer scaffold
-./overlay/README.md
-./overlay/features.toml
-./.gitignore
 ```
 
 ---
 
 ## `oryx-bench attach`
 
-Switch a local-mode project to Oryx mode.
+Switch a local-mode project to Oryx mode
 
 ```
-oryx-bench attach --hash <HASH> [--force]
+Switch a local-mode project to Oryx mode
 
-Required:
-  --hash <HASH>          The Oryx layout hash to attach to
+Usage: attach [OPTIONS] --hash <HASH>
 
 Options:
-  --force                Required if layout.toml has uncommitted changes
-```
+      --hash <HASH>
+          The Oryx layout hash to attach to
 
-**Warning**: this **overwrites** `layout.toml` with whatever Oryx
-currently has. Local-only edits are lost. The command refuses unless the
-working tree is clean or `--force` is passed.
+      --force
+          Skip the working-tree-clean safety check. Required when `layout.toml` has uncommitted
+          changes OR when the directory isn't a git repo (so we can't tell whether your work is
+          committed)
 
----
+  -h, --help
+          Print help
 
-## `oryx-bench detach`
-
-Switch an Oryx-mode project to local mode. **One-way.**
-
-```
-oryx-bench detach [--force]
-
-Options:
-  --force                Skip the confirmation prompt
-```
-
-Converts `pulled/revision.json` to `layout.toml`, removes `pulled/`, and
-from this point forward `oryx-bench pull` no longer functions in this
-project. You can `attach` again later but doing so will *overwrite* your
-`layout.toml`.
-
----
-
-## `oryx-bench pull`
-
-Manually fetch live state from Oryx. Usually unnecessary thanks to
-auto-pull on read commands. Use this when you want to force a fetch right
-now.
-
-```
-oryx-bench pull [--revision <REV>] [--force]
-
-Options:
-  --revision <REV>       Specific revision hash, or "latest" (defaults to kb.toml setting)
-  --force                Bypass the 60s metadata cache and the `auto_pull = never` setting
-```
-
-In **local mode** this command is a no-op (there's nothing to pull).
-
----
-
-## `oryx-bench show`
-
-Render a layer (or all) as an ASCII split-grid keyboard.
-
-```
-oryx-bench show [LAYER] [--names] [--no-pull] [--svg]
-
-Arguments:
-  [LAYER]      Layer name (case-insensitive). Default: render all layers.
-
-Options:
-  --names      Show position names instead of keycodes
-  --no-pull    Skip the auto-pull check (read from local cache only)
-  --svg        Output an SVG via keymap-drawer instead of ASCII grid
-```
-
-Auto-pull behavior: if it's been more than `poll_interval_s` (default
-60s) since the last metadata check, do a cheap GraphQL query to see if
-Oryx has updates. If yes, pull silently before rendering.
-
----
-
-## `oryx-bench explain`
-
-Cross-layer view of a single position.
-
-```
-oryx-bench explain <POSITION>
-
-Arguments:
-  <POSITION>   Position name (e.g. R_thumb_outer, L_pinky_home)
-```
-
-Example:
-
-```
-Position: R_thumb_outer (matrix index 51)
-
-  Main:    LT(SymNum, KC_BSPC)         ⚠ lt-on-high-freq
-  SymNum:  KC_NO
-  System:  KC_TRANSPARENT (falls through to Main → BSPC)
-  Gaming:  KC_NO                       ⚠ kc-no-in-overlay
-```
-
----
-
-## `oryx-bench find`
-
-Search across all layers.
-
-```
-oryx-bench find <QUERY>
-
-Arguments:
-  <QUERY>    One of:
-               KC_<NAME>             positions sending this keycode
-               layer:<NAME>          all bindings on a layer
-               hold:<KEYCODE>        keys with this on hold
-               anti:<RULE_ID>        instances of a lint rule
-               position:<NAME>       same as `explain`
-```
-
----
-
-## `oryx-bench lint`
-
-Run static analysis. Exit code 0 if clean (errors only), 1 if any errors,
-2 if `--strict` and any warnings.
-
-```
-oryx-bench lint [--strict] [--rule <ID>] [--format <FORMAT>] [--no-pull]
-
-Options:
-  --strict             Fail on warnings as well as errors
-  --rule <ID>          Run only this rule
-  --format <FORMAT>    text (default) or json
-  --no-pull            Skip auto-pull
-```
-
----
-
-## `oryx-bench status`
-
-One-screen overview. Always cheap (no full pull, just metadata query).
-**This should be the first command you run in any session.**
-
-```
-oryx-bench status [--no-pull]
-```
-
-Sample output:
-
-```
-Project:  voyager-dvorak
-Mode:     Oryx (hash yrbLx, layout name "Dvorak")
-
-Sources:
-  pulled/revision.json   2 hours ago, sha 7b3a...
-  overlay/features.toml  12 minutes ago
-  overlay/*.zig          0 files
-  overlay/*.c            0 files
-
-Sync:
-  ✓ Up to date with Oryx (last metadata check 8s ago)
-
-Build:
-  ✓ Build cache fresh (last build 12 minutes ago)
-  ⚠ Built since last flash — `oryx-bench flash` to ship
-
-Lint:
-  0 errors, 1 warning (mod-tap-on-vowel)
-
-Git:
-  ✓ No uncommitted changes outside pulled/
-
-Toolchain:
-  build:  docker (image ghcr.io/enriquefft/oryx-bench-qmk:v0.1.0)
-  flash:  wally-cli 2.0.1
-```
-
----
-
-## `oryx-bench diff`
-
-Semantic diff vs git ref, rendered as before/after grids of just the
-changed keys. Diffs both `pulled/revision.json` (or `layout.toml`) and
-the `overlay/` files.
-
-```
-oryx-bench diff [REF] [--layer <NAME>]
-
-Arguments:
-  [REF]              Git reference (default: HEAD)
-
-Options:
-  --layer <NAME>     Limit to one layer
 ```
 
 ---
 
 ## `oryx-bench build`
 
-Compile firmware. Cached: same input → same output, no rebuild.
+Compile firmware via the bundled Docker image
 
 ```
-oryx-bench build [--dry-run] [--release] [--emit-overlay-c] [--no-pull]
+Compile firmware via the bundled Docker image
+
+Usage: build [OPTIONS]
 
 Options:
-  --dry-run            Show what would be built; don't actually build
-  --release            Build with optimizations (LTO, strip)
-  --emit-overlay-c     Save the generated overlay C source to ./.oryx-bench/build/ for inspection
-  --no-pull            Skip auto-pull
+      --dry-run
+          Show what would be built; don't actually build
+
+      --release
+          Build with LTO, strip
+
+      --emit-overlay-c
+          Save the generated overlay C source for inspection
+
+      --no-pull
+          Skip auto-pull
+
+  -h, --help
+          Print help
+
 ```
 
-Output: a path to the built `.bin`, plus stages a copy at
-`./.oryx-bench/build/firmware.bin`.
+---
 
-In v0.1, the only available backend is `docker`. Native and Nix backends
-arrive in v0.2.
+## `oryx-bench detach`
+
+Switch an Oryx-mode project to local mode. One-way
+
+```
+Switch an Oryx-mode project to local mode. One-way
+
+Usage: detach [OPTIONS]
+
+Options:
+      --force
+          Skip the confirmation prompt
+
+  -h, --help
+          Print help
+
+```
+
+---
+
+## `oryx-bench diff`
+
+Semantic diff vs git ref
+
+```
+Semantic diff vs git ref
+
+Usage: diff [OPTIONS] [GIT_REF]
+
+Arguments:
+  [GIT_REF]
+          Git reference to diff against (default: HEAD)
+
+Options:
+      --layer <LAYER>
+          Limit visual layout diff to one layer (case-insensitive name)
+
+  -h, --help
+          Print help
+
+```
+
+---
+
+## `oryx-bench explain`
+
+Cross-layer view of a single position
+
+```
+Cross-layer view of a single position
+
+Usage: explain <POSITION>
+
+Arguments:
+  <POSITION>
+          Position name (e.g. R_thumb_outer, L_pinky_home)
+
+Options:
+  -h, --help
+          Print help
+
+```
+
+---
+
+## `oryx-bench find`
+
+Search across all layers
+
+```
+Search across all layers
+
+Usage: find <QUERY>
+
+Arguments:
+  <QUERY>
+          Query string
+
+Options:
+  -h, --help
+          Print help
+
+```
 
 ---
 
 ## `oryx-bench flash`
 
-Flash the firmware to a connected keyboard. **Requires explicit user
-confirmation** unless `--yes` is passed.
+Flash firmware to a connected keyboard
 
 ```
-oryx-bench flash [--dry-run] [--yes] [--backend <BACKEND>] [--no-pull]
+Flash firmware to a connected keyboard
+
+Usage: flash [OPTIONS]
 
 Options:
-  --dry-run              Print what would be flashed; don't flash
-  --yes                  Skip the CLI's confirmation prompt
-                         (still requires conversational approval — use this in agent loops)
-  --backend <BACKEND>    auto (default), wally, keymapp
-  --no-pull              Skip auto-pull (already the default for flash)
+      --dry-run
+          Print what would be flashed; don't flash
+
+      --yes
+          Skip the CLI's confirmation prompt. Still requires explicit conversational approval when
+          used by an agent — this flag only bypasses the in-process `[y/N]` prompt
+
+      --backend <BACKEND>
+          Backend selection. `auto` (default) prefers wally-cli if installed and falls back to the
+          Keymapp GUI handoff
+
+          Possible values:
+          - auto:    Prefer wally-cli if it's on PATH; otherwise fall back to keymapp
+          - wally:   Force `wally-cli`. Errors if it isn't installed
+          - keymapp: Force the Keymapp GUI handoff
+          
+          [default: auto]
+
+      --force
+          Flash even if the firmware on disk doesn't match the current canonical inputs (i.e.
+          someone forgot to rebuild after a pull or overlay edit). Off by default; use only when you
+          know what you're doing
+
+  -h, --help
+          Print help (see a summary with '-h')
+
 ```
-
-Behavior:
-
-1. If `wally-cli` is on PATH (and backend is auto/wally), invoke it
-   directly with the latest built firmware
-2. Otherwise: copy the firmware to `~/.cache/oryx-bench/firmware.bin` and
-   print platform-specific Keymapp GUI instructions
-3. **Never** invoke `dfu-util` directly — the Voyager flashing protocol is
-   custom and bricking risk is real
-
-`--dry-run` output:
-
-```
-Would flash:
-  firmware:  /tmp/.oryx-bench/build/firmware.bin
-  size:      54918 bytes
-  sha256:    7b3a1e...
-  target:    ZSA Voyager (vendor 0x3297)
-  via:       wally-cli
-```
-
-Auto-pull behavior: **never** auto-pulls. Flashing is the moment of
-commitment; you flash exactly what you just looked at, no surprises.
 
 ---
 
-## `oryx-bench skill install`
+## `oryx-bench init`
 
-Install the project-local Claude Code skill at
-`./.claude/skills/oryx-bench/`.
+Create a project skeleton
 
 ```
-oryx-bench skill install [--global] [--force]
+Create a project skeleton
+
+Usage: init [OPTIONS]
 
 Options:
-  --global    Install to ~/.claude/skills/ instead of project-local
-              DISCOURAGED — eats context budget in unrelated Claude Code sessions
-  --force     Overwrite existing files
+      --hash <HASH>
+          The Oryx layout hash. Mutually exclusive with `--blank`
+
+      --blank
+          Use local mode (no Oryx hash)
+
+      --geometry <GEOMETRY>
+          Keyboard geometry (voyager in v0.1)
+          
+          [default: voyager]
+
+      --name <NAME>
+          Friendly project name (defaults to current dir basename)
+
+      --no-skill
+          Don't prompt to install the project-local Claude Code skill
+
+      --force
+          Overwrite existing files
+
+  -h, --help
+          Print help
+
 ```
 
 ---
 
-## `oryx-bench skill remove`
+## `oryx-bench lint`
 
-Uninstall the skill.
-
-```
-oryx-bench skill remove [--global]
-```
-
----
-
-## Global flags
-
-Available on all commands:
+Run static analysis
 
 ```
-  --project <PATH>     Path to the project root (default: discover from cwd)
-  --color <WHEN>       auto (default) | always | never
-  --verbose, -v        Increase logging verbosity (repeatable)
-  -h, --help           Show help
-  -V, --version        Show version
-```
+Run static analysis
 
----
+Usage: lint [OPTIONS]
 
-## Environment variables
+Options:
+      --strict
+          Fail on warnings as well as errors
 
-```
-ORYX_BENCH_LOG=trace          Set log level (trace/debug/info/warn/error)
-ORYX_BENCH_NO_COLOR=1         Disable ANSI colors (same as --color=never)
-ORYX_BENCH_CACHE_DIR=<path>   Override cache directory location
-NO_COLOR=1                    Standard env var, also respected
+      --rule <RULE>
+          Run only this rule
+
+      --format <FORMAT>
+          Output format
+          
+          [default: text]
+          [possible values: text, json]
+
+      --no-pull
+          Skip auto-pull
+
+  -h, --help
+          Print help
+
 ```
 
 ---
 
-## Exit codes
+## `oryx-bench pull`
+
+Manually fetch live state from Oryx. Usually unnecessary thanks to auto-pull
 
 ```
-0   Success
-1   Lint errors / build failure / explicit failure
-2   Lint warnings (only with --strict)
-64  Usage error (bad arguments)
-65  Data error (corrupt revision.json or layout.toml, unknown keycode)
-69  Service unavailable (Oryx GraphQL down)
-74  IO error (couldn't write file, network failure)
+Manually fetch live state from Oryx. Usually unnecessary thanks to auto-pull
+
+Usage: pull [OPTIONS]
+
+Options:
+      --revision <REVISION>
+          Specific revision hash, or "latest" (defaults to kb.toml)
+
+      --force
+          Bypass the 60s metadata cache and the `auto_pull = never` setting
+
+  -h, --help
+          Print help
+
 ```
+
+---
+
+## `oryx-bench setup`
+
+Detect toolchain (qmk, gcc-arm, zig, docker, wally-cli, keymapp). Idempotent
+
+```
+Detect toolchain (qmk, gcc-arm, zig, docker, wally-cli, keymapp). Idempotent
+
+Usage: setup [OPTIONS]
+
+Options:
+  -f, --full
+          Print each tool's `--version` output (or the equivalent flag), not just whether it was
+          found on PATH. Useful when debugging version-mismatch issues with the docker build backend
+
+  -h, --help
+          Print help
+
+```
+
+---
+
+## `oryx-bench show`
+
+Render a layer (or all) as an ASCII split-grid keyboard
+
+```
+Render a layer (or all) as an ASCII split-grid keyboard
+
+Usage: show [OPTIONS] [LAYER]
+
+Arguments:
+  [LAYER]
+          Layer name (case-insensitive). Default: render all layers
+
+Options:
+      --names
+          Show position names instead of keycodes
+
+      --no-pull
+          Skip the auto-pull check (read from local cache only)
+
+  -h, --help
+          Print help
+
+```
+
+---
+
+## `oryx-bench skill`
+
+Install / remove the project-local Claude Code skill
+
+```
+Install / remove the project-local Claude Code skill
+
+Usage: skill <COMMAND>
+
+Commands:
+  install  Install the skill at `./.claude/skills/oryx-bench/` (or `~/.claude/...` with --global)
+  remove   Remove the skill from the project (or global install with --global)
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help
+
+```
+
+---
+
+## `oryx-bench status`
+
+One-screen overview of project, sync, and lint state
+
+```
+One-screen overview of project, sync, and lint state
+
+Usage: status [OPTIONS]
+
+Options:
+      --no-pull
+          Skip the metadata query (useful offline)
+
+  -h, --help
+          Print help
+
+```
+
+---
+
+## `oryx-bench upgrade-check`
+
+Re-run lint with the current keycode catalog. Use after `cargo install --force oryx-bench`
+
+```
+Re-run lint with the current keycode catalog. Use after `cargo install --force oryx-bench`
+
+Usage: upgrade-check
+
+Options:
+  -h, --help
+          Print help
+
+```
+
+---
+

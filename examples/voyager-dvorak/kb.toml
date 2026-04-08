@@ -12,15 +12,8 @@ geometry = "voyager"
 revision = "latest"          # always pull the live state
 
 [build]
-backend    = "auto"          # auto | native | docker | nix
-qmk_branch = "firmware24"    # which branch of zsa/qmk_firmware to build against
-
-[flash]
-backend = "auto"             # auto | wally | keymapp
+backend = "docker"           # v0.1 supports `docker` (or `auto`, which resolves to docker)
 
 [lint]
 # Suppress noisy/intentional rule IDs here. Empty by default.
 ignore = []
-
-[render]
-default_layer = "Main"

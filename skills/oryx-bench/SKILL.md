@@ -1,6 +1,6 @@
 ---
 name: oryx-bench
-description: Manage ZSA keyboard layouts via the oryx-bench CLI. Use when discussing keyboard layouts, key bindings, layer changes, achordion, tap-hold, custom keycodes, key overrides, combos, ZSA, Oryx, Keymapp, QMK, Voyager, Moonlander, or Ergodox. Supports both Oryx-mode (visual editor + local code) and local-only mode (no cloud dependency).
+description: Manage ZSA keyboard layouts via the oryx-bench CLI. Use when discussing keyboard layouts, key bindings, layer changes, achordion, tap-hold, custom keycodes, key overrides, combos, ZSA, Oryx, Keymapp, QMK, or the ZSA Voyager. v0.1 supports the Voyager geometry only — Moonlander/Ergodox are tracked for a future release. Supports both Oryx-mode (visual editor + local code) and local-only mode (no cloud dependency).
 ---
 
 # oryx-bench
@@ -271,19 +271,20 @@ contribute.
 ## Commands you have
 
 ```
-oryx-bench setup                  Detect toolchain. Idempotent. Read once per session.
+oryx-bench setup [--full]         Detect toolchain. Idempotent. --full runs each tool's --version.
 oryx-bench init                   Create project skeleton. --hash for Oryx mode, --blank for local mode.
 oryx-bench attach --hash <H>      Switch local-mode project to Oryx mode (overwrites local).
-oryx-bench detach                 Switch Oryx-mode project to local mode. ONE-WAY.
+oryx-bench detach [--force]       Switch Oryx-mode project to local mode. ONE-WAY.
 oryx-bench pull                   Manually fetch from Oryx (auto-pull usually does this).
 oryx-bench show [LAYER]           Render layer(s) as ASCII split-grid.
 oryx-bench explain POSITION       Cross-layer view of one position.
 oryx-bench find QUERY             Search across layers.
 oryx-bench lint [--strict]        Static analysis. --strict exits non-zero on warnings too.
-oryx-bench diff [REF]             Semantic diff vs git ref. Show user before flashing.
 oryx-bench status                 One-screen overview — RUN THIS FIRST in any session.
 oryx-bench build [--dry-run]      Compile firmware. Cached. Fast on no-op.
-oryx-bench flash [--dry-run] [--yes]   Flash to keyboard. REQUIRES USER APPROVAL.
+oryx-bench diff [REF]             Semantic diff vs git ref. Show user before flashing.
+oryx-bench flash [--dry-run] [--yes] [--force]   Flash to keyboard. REQUIRES USER APPROVAL. --force bypasses the build-freshness check.
+oryx-bench upgrade-check          Re-run lint after `cargo install --force oryx-bench`. Surfaces uncatalogued keycodes.
 oryx-bench skill install          Already done if you're reading this.
 ```
 
