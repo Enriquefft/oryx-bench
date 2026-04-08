@@ -1,0 +1,11 @@
+---
+source: tests/render_snapshot.rs
+expression: out
+---
+|L_oute…|L_pink…|L_ring…|L_midd…|L_inde…|L_inne…|    |R_inne…|R_inde…|R_midd…|R_ring…|R_pink…|R_oute…|
+|L_oute…|L_pink…|L_ring…|L_midd…|L_inde…|L_inne…|    |R_inne…|R_inde…|R_midd…|R_ring…|R_pink…|R_oute…|
+|L_oute…|L_pink…|L_ring…|L_midd…|L_inde…|L_inne…|    |R_inne…|R_inde…|R_midd…|R_ring…|R_pink…|R_oute…|
+|L_oute…|L_pink…|L_ring…|L_midd…|L_inde…|L_inne…|    |R_inne…|R_inde…|R_midd…|R_ring…|R_pink…|R_oute…|
+
+                                 |L_thum…|    |R_thum…|
+                                 |L_thum…|    |R_thum…|

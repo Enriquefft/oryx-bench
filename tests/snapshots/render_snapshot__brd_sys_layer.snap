@@ -1,0 +1,11 @@
+---
+source: tests/render_snapshot.rs
+expression: out
+---
+|KC_NO  |RGB_TOG|TOGGLE…|RGB_MOD|RGB_VAD|RGB_VAI|    |KC_TRNS|KC_TRNS|KC_TRNS|KC_TRNS|KC_TRNS|QK_BOOT|
+|KC_TRNS|KC_TRNS|KC_VOLD|KC_VOLU|KC_MUTE|RGB_SLD|    |KC_PGUP|KC_HOME|KC_UP  |KC_END |KC_TRNS|KC_TRNS|
+|KC_TRNS|KC_MPRV|KC_MNXT|KC_MSTP|KC_MPLY|KC_TRNS|    |KC_PGDN|KC_LEFT|KC_DOWN|KC_RIG…|KC_TRNS|KC_TRNS|
+|KC_TRNS|KC_TRNS|KC_TRNS|RGB    |RGB    |RGB    |    |KC_TRNS|LCTL(L…|LCTL(K…|KC_TRNS|KC_TRNS|KC_TRNS|
+
+                                 |KC_TRNS|    |KC_NO  |
+                                 |KC_NO  |    |KC_TRNS|
