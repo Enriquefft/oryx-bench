@@ -115,8 +115,6 @@ in
   };
 
   config = mkIf cfg.enable {
-    # Make oryx-bench available system-wide
-    environment.systemPackages = [ cfg.package ];
 
     # Build all enabled keyboard layouts and expose them
     system.extraSystemBuilderCmds =
