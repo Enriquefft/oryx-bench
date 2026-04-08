@@ -21,13 +21,17 @@ struct Cli {
 #[derive(Subcommand)]
 enum Cmd {
     /// Regenerate skills/oryx-bench/reference/{lint-rules,command-reference}.md
-    GenSkillDocs,
+    GenSkillDocs {
+        /// Check that files are up-to-date without modifying them
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.cmd {
-        Cmd::GenSkillDocs => xtask_gen_skill_docs::run(),
+        Cmd::GenSkillDocs { check } => xtask_gen_skill_docs::run(check),
     }
 }
 
@@ -35,20 +39,37 @@ mod xtask_gen_skill_docs {
     use std::fs;
     use std::path::{Path, PathBuf};
 
-    use anyhow::{Context, Result};
+    use anyhow::{bail, Context, Result};
 
-    pub fn run() -> Result<()> {
+    pub fn run(check: bool) -> Result<()> {
         let skills_dir = project_root().join("skills/oryx-bench/reference");
         fs::create_dir_all(&skills_dir)
             .with_context(|| format!("creating {}", skills_dir.display()))?;
 
         let lint_md = oryx_bench::lint::gen_lint_rules_markdown();
-        atomic_write(&skills_dir.join("lint-rules.md"), &lint_md)?;
-
         let cmd_md = oryx_bench::cli::gen_command_reference_markdown();
-        atomic_write(&skills_dir.join("command-reference.md"), &cmd_md)?;
 
-        println!("regenerated lint-rules.md + command-reference.md");
+        if check {
+            check_or_regenerate(&skills_dir.join("lint-rules.md"), &lint_md)?;
+            check_or_regenerate(&skills_dir.join("command-reference.md"), &cmd_md)?;
+            println!("skill docs are up-to-date");
+        } else {
+            atomic_write(&skills_dir.join("lint-rules.md"), &lint_md)?;
+            atomic_write(&skills_dir.join("command-reference.md"), &cmd_md)?;
+            println!("regenerated lint-rules.md + command-reference.md");
+        }
+        Ok(())
+    }
+
+    fn check_or_regenerate(path: &Path, expected: &str) -> Result<()> {
+        let actual = fs::read_to_string(path)
+            .with_context(|| format!("reading {}", path.display()))?;
+        if actual != expected {
+            bail!(
+                "{} is out of date. Run `cargo xtask gen-skill-docs` to regenerate.",
+                path.display()
+            );
+        }
         Ok(())
     }
 
