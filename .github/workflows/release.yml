@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    name: Create release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Verify version matches Cargo.toml
+        run: |
+          CARGO_VERSION=$(grep '^version = ' Cargo.toml | head -1 | cut -d'"' -f2)
+          TAG_VERSION=${{ steps.version.outputs.version }}
+          if [ "v${CARGO_VERSION}" != "${TAG_VERSION}" ]; then
+            echo "Version mismatch: Cargo.toml has ${CARGO_VERSION} but tag is ${TAG_VERSION}"
+            exit 1
+          fi
+
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
+          body: |
+            See CHANGELOG.md for details.
+
+            ## Installation
+
+            ### Binary (Linux/macOS)
+            ```bash
+            curl -fsSL https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/oryx-bench-${{ steps.version.outputs.version }}.tar.gz | tar xz
+            sudo mv oryx-bench /usr/local/bin/
+            ```
+
+            ### Nix
+            ```bash
+            nix run github:${{ github.repository }}/${{ steps.version.outputs.version }}
+            ```
+
+            ### Homebrew
+            ```bash
+            brew install ${{ github.repository }}
+            ```
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
