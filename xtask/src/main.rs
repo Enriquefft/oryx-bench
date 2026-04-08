@@ -62,8 +62,8 @@ mod xtask_gen_skill_docs {
     }
 
     fn check_or_regenerate(path: &Path, expected: &str) -> Result<()> {
-        let actual = fs::read_to_string(path)
-            .with_context(|| format!("reading {}", path.display()))?;
+        let actual =
+            fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         if actual != expected {
             bail!(
                 "{} is out of date. Run `cargo xtask gen-skill-docs` to regenerate.",

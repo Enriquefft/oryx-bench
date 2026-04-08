@@ -69,13 +69,12 @@ COPY pin.txt /firmware_pin.txt
 
 RUN set -e && \
     REF=$(cat /firmware_pin.txt | tr -d '\n' | tr -d '\r') && \
-    echo "Cloning qmk_firmware (ref: ${REF})" && \
+    echo "Cloning qmk_firmware at ${REF}" && \
     mkdir -p /firmware && \
     cd /firmware && \
-    git clone --depth=100 --filter=blob:none https://github.com/zsa/qmk_firmware.git . && \
+    git clone --filter=blob:none https://github.com/zsa/qmk_firmware.git . && \
     git checkout "${REF}" && \
-    COMMIT_SHA=$(git rev-parse HEAD) && \
-    echo "Pinned to: ${COMMIT_SHA}"
+    echo "Pinned to: $(git rev-parse HEAD)"
 
 # Install QMK Python dependencies
 # Use --break-system-packages because we're in a container environment
