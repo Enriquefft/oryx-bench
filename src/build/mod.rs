@@ -49,6 +49,15 @@ pub fn build_sha_path(project: &Project) -> PathBuf {
     build_dir(project).join("build.sha")
 }
 
+/// Invalidate the build cache so the next `build` regenerates and
+/// recompiles. Best-effort — a stale cache file is not fatal.
+pub fn invalidate_build_cache(project: &Project) {
+    let sha_path = build_sha_path(project);
+    if sha_path.exists() {
+        let _ = std::fs::remove_file(&sha_path);
+    }
+}
+
 /// Hash all the inputs that affect the firmware so the build cache can
 /// detect "nothing changed".
 pub fn input_sha(generated: &Generated, overlay_dir: Option<&Path>) -> Result<String> {

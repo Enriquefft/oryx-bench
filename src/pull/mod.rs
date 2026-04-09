@@ -213,6 +213,10 @@ fn pull_impl(
     cache.last_remote_hash = Some(remote_hash.clone());
     write_cache(project, &cache)?;
 
+    // Invalidate the build cache so the next `build` regenerates from
+    // the updated layout instead of serving stale firmware.
+    crate::build::invalidate_build_cache(project);
+
     Ok(PullOutcome::Pulled {
         from: local_hash,
         to: remote_hash,

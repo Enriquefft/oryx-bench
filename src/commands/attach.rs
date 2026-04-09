@@ -115,6 +115,10 @@ pub fn run(args: Args, project_override: Option<PathBuf>) -> Result<ExitCode> {
     std::fs::remove_dir_all(&staging_dir)
         .with_context(|| format!("removing {}", staging_dir.display()))?;
 
+    // Invalidate the build cache so the next `build` regenerates from
+    // the pulled Oryx layout instead of serving stale local artifacts.
+    crate::build::invalidate_build_cache(&project);
+
     println!(
         "{} Attached to Oryx hash '{}'. Pull result: {outcome:?}",
         crate::util::term::OK,

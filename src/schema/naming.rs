@@ -27,7 +27,7 @@ pub fn sanitize_c_ident(title: &str) -> String {
         }
     }
     let trimmed = out.trim_matches('_').to_string();
-    if trimmed
+    let result = if trimmed
         .chars()
         .next()
         .map(|c| c.is_ascii_digit())
@@ -36,6 +36,11 @@ pub fn sanitize_c_ident(title: &str) -> String {
         format!("L_{trimmed}")
     } else {
         trimmed
+    };
+    if result.is_empty() {
+        "LAYER".to_string()
+    } else {
+        result
     }
 }
 
@@ -53,5 +58,10 @@ mod tests {
     #[test]
     fn prefixes_leading_digit() {
         assert_eq!(sanitize_c_ident("1 Fun"), "L_1_FUN");
+    }
+
+    #[test]
+    fn empty_string_fallback() {
+        assert_eq!(sanitize_c_ident(""), "LAYER");
     }
 }

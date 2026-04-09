@@ -31,6 +31,17 @@ pub fn run(args: Args, project_override: Option<PathBuf>) -> Result<ExitCode> {
         bail!("project is not in Oryx mode — nothing to detach");
     }
 
+    // Check for a pre-existing layout.toml BEFORE the confirmation prompt
+    // so the user sees the conflict immediately, not after re-running with
+    // --force. With --force, the overwrite is intentional so we skip this.
+    let target = project.root.join("layout.toml");
+    if target.exists() && !args.force {
+        bail!(
+            "refusing to overwrite existing {} during detach. Re-run with --force to overwrite, or delete it manually first.",
+            target.display()
+        );
+    }
+
     if !args.force {
         eprintln!(
             "About to detach this project from Oryx.\n\
@@ -72,14 +83,7 @@ pub fn run(args: Args, project_override: Option<PathBuf>) -> Result<ExitCode> {
     // of multiple writes is not inherently transactional across
     // processes. We get as close as possible:
     //
-    //   0. **Refuse to clobber a pre-existing user-authored
-    //      `layout.toml`.** A user could have authored their own
-    //      layout.toml in an Oryx-mode project (e.g. as a draft for
-    //      a future detach, or for reference). The previous
-    //      implementation called `atomic_write` unconditionally,
-    //      silently destroying that file. We bail with `--force`
-    //      as the escape hatch.
-    //   1. Write layout.toml. If this fails the project is untouched.
+    //   0. Write layout.toml. If this fails the project is untouched.
     //   2. Write the new kb.toml. If this fails, ROLL BACK by
     //      deleting the just-written layout.toml so the user sees
     //      the same on-disk state they started with — leaving an
@@ -95,13 +99,6 @@ pub fn run(args: Args, project_override: Option<PathBuf>) -> Result<ExitCode> {
     //      user is better served by a clear message than by another
     //      speculative rewrite).
     //   4. Remove the auto-pull cache; same semantics as pulled/.
-    let target = project.root.join("layout.toml");
-    if target.exists() {
-        bail!(
-            "refusing to overwrite existing {} during detach. Either delete it manually first or move it out of the way; this guard exists because a user-authored layout.toml in an Oryx-mode project would otherwise be silently destroyed.",
-            target.display()
-        );
-    }
     fsx::atomic_write(&target, layout_toml.as_bytes())?;
 
     if let Err(e) = fsx::atomic_write(&project.root.join("kb.toml"), new_kb.as_bytes()) {
@@ -141,6 +138,10 @@ pub fn run(args: Args, project_override: Option<PathBuf>) -> Result<ExitCode> {
             );
         }
     }
+
+    // Invalidate the build cache so the next `build` regenerates from
+    // the new layout.toml instead of serving stale artifacts.
+    crate::build::invalidate_build_cache(&project);
 
     println!(
         "{} Detached. layout.toml written at {}. pulled/ removed.",

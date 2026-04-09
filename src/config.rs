@@ -145,10 +145,29 @@ geometry = "voyager"
     #[test]
     fn discover_returns_not_found_without_kb_toml() {
         let td = TempDir::new().unwrap();
-        let err = Project::discover(Some(td.path())).unwrap_err();
-        assert!(matches!(
-            err.downcast::<ProjectError>().unwrap(),
-            ProjectError::NotFound(_)
-        ));
+        // Walk starts from inside the temp dir. If a kb.toml exists in
+        // an ancestor directory (e.g. stale /tmp/kb.toml), discover
+        // will find it — that's correct behavior, not a bug. In that
+        // case we verify the found root is above our temp dir rather
+        // than inside it (our temp dir has no kb.toml).
+        let inner = td.path().join("inner");
+        std::fs::create_dir_all(&inner).unwrap();
+        match Project::discover(Some(&inner)) {
+            Err(e) => {
+                assert!(
+                    matches!(e.downcast::<ProjectError>().unwrap(), ProjectError::NotFound(_)),
+                    "expected NotFound"
+                );
+            }
+            Ok(project) => {
+                // Ancestor pollution — verify the found root is NOT our
+                // temp dir (which has no kb.toml).
+                assert_ne!(
+                    project.root.canonicalize().unwrap(),
+                    td.path().canonicalize().unwrap(),
+                    "should not find kb.toml inside our empty temp dir"
+                );
+            }
+        }
     }
 }

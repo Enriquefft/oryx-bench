@@ -29,6 +29,15 @@ pub struct Layout {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct Swatch {
+    #[serde(default)]
+    pub colors: Option<Vec<String>>,
+    #[serde(flatten)]
+    pub extra: HashMap<String, Value>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct Revision {
     pub hash_id: String,
     #[serde(default)]
@@ -55,7 +64,7 @@ pub struct Revision {
     #[serde(default)]
     pub config: HashMap<String, Value>,
     #[serde(default)]
-    pub swatch: Option<Vec<String>>,
+    pub swatch: Option<Swatch>,
     #[serde(flatten)]
     pub extra: HashMap<String, Value>,
 }
@@ -137,11 +146,16 @@ pub struct Combo {
     /// Index into the revision's layer list. Required by the live
     /// schema (`Int!`).
     pub layer_idx: u8,
-    /// The action emitted when the combo fires. Same JSON shape as a
-    /// regular key's `tap`/`hold` action — `code`, optional
-    /// `modifier(s)`, etc. Held as `serde_json::Value` so the canonical
-    /// layer can re-deserialize it through `oryx::Action` and reuse the
-    /// existing `oryx_action_to_canonical` translator.
+    /// The action emitted when the combo fires. Oryx has changed this
+    /// field's shape over time:
+    ///
+    /// - **Old format**: a flat action object with `code`, `modifier(s)`,
+    ///   etc. (same shape as a key's `tap`/`hold`).
+    /// - **New format** (2026-Q2+): a full key object with `tap`, `hold`,
+    ///   `detached`, etc. The actual action lives in `trigger.tap`.
+    ///
+    /// We hold the raw JSON and normalize in the canonical converter so
+    /// both wire formats are handled without fragile version checks.
     pub trigger: Value,
     #[serde(flatten)]
     pub extra: HashMap<String, Value>,

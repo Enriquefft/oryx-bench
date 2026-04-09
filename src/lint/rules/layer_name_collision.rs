@@ -12,16 +12,16 @@ impl LintRule for Rule {
         "layer-name-collision"
     }
     fn severity(&self) -> Severity {
-        Severity::Error
+        Severity::Warning
     }
     fn description(&self) -> &'static str {
         "Two layers whose titles sanitize to the same C identifier. For example, `\"Sym + Num\"` and `\"Sym Num\"` both sanitize to `SYM_NUM`."
     }
     fn why_bad(&self) -> &'static str {
-        "The generator can't produce a valid `enum layers` with duplicate names; build fails."
+        "The codegen auto-disambiguates colliding layer names by appending the layer position (e.g. LAYER_1, LAYER_2). This works, but unique layer names improve readability of the generated C code."
     }
     fn fix_example(&self) -> &'static str {
-        "Rename one of the colliding layers in Oryx (or `layout.toml`) so their sanitized identifiers differ."
+        "Rename the colliding layers in Oryx (or `layout.toml`) to have distinct names so the generated enum members are self-documenting."
     }
 
     fn check(&self, ctx: &LintContext) -> Vec<Issue> {

@@ -378,6 +378,13 @@ impl CanonicalLayout {
                 })?;
                 keys[idx] = action.to_canonical_key();
             }
+            // Normalize tap+hold combinations so local-mode layouts
+            // produce the same canonical representation as the Oryx path.
+            for key in &mut keys {
+                let (tap, hold) = normalize_tap_hold(key.tap.take(), key.hold.take());
+                key.tap = tap;
+                key.hold = hold;
+            }
             out_layers.push(CanonicalLayer {
                 name: layer.name.clone(),
                 position: layer.position,
@@ -422,20 +429,18 @@ fn resolve_layer_refs(action: &mut CanonicalAction, idx_to_name: &[(u8, String)]
     }
 }
 
-fn oryx_key_to_canonical(k: &oryx::Key) -> CanonicalKey {
-    let tap = k.tap.as_ref().map(oryx_action_to_canonical);
-    let hold = k.hold.as_ref().map(oryx_action_to_canonical);
-    let double_tap = k.double_tap.as_ref().map(oryx_action_to_canonical);
-    let tap_hold = k.tap_hold.as_ref().map(oryx_action_to_canonical);
-
-    // Normalize tap+hold combinations into a single combinator on `tap`,
-    // so the rest of the codebase only ever sees one shape per concept.
-    //
-    // - tap=KC_X + hold=MO(N)        → tap=LT(N, X), hold=None
-    // - tap=KC_X + hold=Modifier(M)  → tap=ModTap{M, X}, hold=None
-    // - tap=KC_X + hold=KC_<MOD>     → tap=ModTap{M, X}, hold=None  (Oryx may emit this shape)
-    // - tap=X + hold=X               → tap=X, hold=None              (redundant identity)
-    let (tap, hold) = match (tap, hold) {
+/// Normalize tap+hold combinations into a single combinator on `tap`,
+/// so the rest of the codebase only ever sees one shape per concept.
+///
+/// - tap=KC_X + hold=MO(N)        → tap=LT(N, X), hold=None
+/// - tap=KC_X + hold=Modifier(M)  → tap=ModTap{M, X}, hold=None
+/// - tap=KC_X + hold=KC_<MOD>     → tap=ModTap{M, X}, hold=None  (Oryx may emit this shape)
+/// - tap=X + hold=X               → tap=X, hold=None              (redundant identity)
+fn normalize_tap_hold(
+    tap: Option<CanonicalAction>,
+    hold: Option<CanonicalAction>,
+) -> (Option<CanonicalAction>, Option<CanonicalAction>) {
+    match (tap, hold) {
         (Some(CanonicalAction::Keycode(kc)), Some(CanonicalAction::Mo { layer })) => (
             Some(CanonicalAction::Lt {
                 layer,
@@ -453,7 +458,16 @@ fn oryx_key_to_canonical(k: &oryx::Key) -> CanonicalKey {
         // Redundant: tap and hold are the same action → collapse to tap-only.
         (Some(a), Some(b)) if a == b => (Some(a), None),
         other => other,
-    };
+    }
+}
+
+fn oryx_key_to_canonical(k: &oryx::Key) -> CanonicalKey {
+    let tap = k.tap.as_ref().map(oryx_action_to_canonical);
+    let hold = k.hold.as_ref().map(oryx_action_to_canonical);
+    let double_tap = k.double_tap.as_ref().map(oryx_action_to_canonical);
+    let tap_hold = k.tap_hold.as_ref().map(oryx_action_to_canonical);
+
+    let (tap, hold) = normalize_tap_hold(tap, hold);
 
     CanonicalKey {
         tap,
@@ -478,12 +492,20 @@ fn oryx_key_to_canonical(k: &oryx::Key) -> CanonicalKey {
 /// - `layerIdx` is translated to a human-readable layer name by looking
 ///   up the layer with the matching `position` field in the revision's
 ///   layer list. An unknown index is a loud error, same reasoning.
-/// - `trigger` is re-deserialized as an `oryx::Action` (it has the same
-///   JSON shape as a regular key action) and run through
-///   `oryx_action_to_canonical`, then rendered to its canonical
+/// - `trigger` can arrive in two JSON shapes depending on the Oryx
+///   release:
+///   1. **Old (flat) format** — a top-level `code` key, e.g.
+///      `{"code": "KC_ESCAPE", …}`. The entire object is the action.
+///   2. **New (key-object) format** — a top-level `tap` key wrapping
+///      an action, e.g. `{"tap": {"code": "TO", "layer": 2, …}}`. The
+///      action lives inside `trigger.tap`.
+///
+///   Both are deserialized into `oryx::Action`, run through
+///   `oryx_action_to_canonical`, then rendered to the canonical
 ///   keycode-string form for `CanonicalCombo.sends`. A trigger that
 ///   fails to deserialize is a loud error — silently dropping it would
-///   produce a combo that fires nothing.
+///   produce a combo that fires nothing. A trigger containing *both*
+///   `code` and `tap` is rejected as ambiguous.
 ///
 /// `timeout_ms` is not yet exposed by the live schema; future schemas
 /// can populate it via the `extra` bag without changing this signature.
@@ -531,12 +553,35 @@ fn oryx_combo_to_canonical(
 
     let layer = resolve_combo_layer(c.layer_idx, layer_index_to_name)?;
 
-    // The `trigger` JSON has the same shape as a key action: a `code`
-    // string with optional `modifier(s)`. Re-deserializing through
-    // `oryx::Action` keeps the keycode-translation logic in one place
-    // (single source of truth: `oryx_action_to_canonical`).
-    let trigger_action: oryx::Action = serde_json::from_value(c.trigger.clone())
-        .map_err(|e| anyhow!("Oryx combo `trigger` is not a valid Action JSON: {e}"))?;
+    // The `trigger` field has changed shape over Oryx releases. We handle
+    // both formats:
+    //
+    // 1. Old format: flat action object — `{"code": "KC_ESCAPE", ...}`.
+    //    Detectable by the presence of a top-level `code` key.
+    // 2. New format: full key object — `{"tap": {"code": "TO", ...}, ...}`.
+    //    Detectable by the presence of a top-level `tap` key.
+    //
+    // If neither key exists the combo is inert (partially edited in Oryx).
+    if c.trigger.get("code").is_some() && c.trigger.get("tap").is_some() {
+        anyhow::bail!(
+            "Oryx combo (keys={:?}) trigger has both 'code' and 'tap' — ambiguous format",
+            c.key_indices
+        );
+    }
+    let trigger_action: oryx::Action = if c.trigger.get("code").is_some() {
+        // Old format: trigger IS the action.
+        serde_json::from_value(c.trigger.clone())
+            .map_err(|e| anyhow!("Oryx combo trigger (old format) is not valid: {e}"))?
+    } else if let Some(tap) = c.trigger.get("tap").cloned() {
+        // New format: actual action is inside trigger.tap.
+        serde_json::from_value(tap)
+            .map_err(|e| anyhow!("Oryx combo trigger.tap (new format) is not valid: {e}"))?
+    } else {
+        anyhow::bail!(
+            "Oryx combo (keys={:?}) trigger has neither 'code' nor 'tap' — combo is inert",
+            c.key_indices
+        );
+    };
     let sends = oryx_action_to_canonical(&trigger_action).display();
 
     Ok(CanonicalCombo {

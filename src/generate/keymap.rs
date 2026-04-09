@@ -28,7 +28,7 @@ use std::fmt::Write;
 use crate::schema::canonical::{CanonicalAction, CanonicalLayer, CanonicalLayout, LayerRef};
 use crate::schema::geometry::Geometry;
 
-use super::{CustomKeycodeTable, LayerTable};
+use super::{CustomKeycodeTable, LayerTable, TapDanceTable};
 
 /// Top-level entry point — produces the full keymap.c source string.
 ///
@@ -41,6 +41,7 @@ pub fn emit_keymap_c(
     geom: &dyn Geometry,
     layers: &LayerTable,
     custom_keycodes: &CustomKeycodeTable,
+    tap_dances: &TapDanceTable,
 ) -> anyhow::Result<String> {
     let mut out = String::new();
     out.push_str("// SPDX-License-Identifier: MIT\n");
@@ -51,7 +52,7 @@ pub fn emit_keymap_c(
     out.push_str(&emit_layers_enum(layout, layers));
     out.push('\n');
 
-    out.push_str(&emit_keymaps_array(layout, geom, layers, custom_keycodes)?);
+    out.push_str(&emit_keymaps_array(layout, geom, layers, custom_keycodes, tap_dances)?);
 
     Ok(out)
 }
@@ -76,6 +77,7 @@ fn emit_keymaps_array(
     geom: &dyn Geometry,
     layers: &LayerTable,
     custom_keycodes: &CustomKeycodeTable,
+    tap_dances: &TapDanceTable,
 ) -> anyhow::Result<String> {
     let mut out = String::from("const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {\n");
     let mut sorted: Vec<&CanonicalLayer> = layout.layers.iter().collect();
@@ -109,7 +111,17 @@ fn emit_keymaps_array(
         let mut cells: Vec<String> = Vec::with_capacity(qmk_order.len());
         for &canonical_idx in qmk_order {
             let cell = match layer.keys.get(canonical_idx) {
-                Some(k) => emit_key(k, layers, custom_keycodes)?,
+                Some(k) => {
+                    // If this key has a tap-dance entry, emit TD(n).
+                    if let Some(td) = tap_dances
+                        .iter()
+                        .find(|td| td.layer_position == layer.position && td.key_index == canonical_idx)
+                    {
+                        format!("TD({})", td.td_index)
+                    } else {
+                        emit_key(k, layers, custom_keycodes)?
+                    }
+                }
                 None => "KC_NO".to_string(),
             };
             cells.push(cell);
@@ -136,6 +148,16 @@ pub fn emit_key(
     custom_keycodes: &CustomKeycodeTable,
 ) -> anyhow::Result<String> {
     use crate::schema::canonical::CanonicalAction;
+
+    // Defensive: double_tap keys should be handled by the tap-dance table
+    // lookup in emit_keymaps_array, never reach emit_key directly.
+    if key.double_tap.is_some() {
+        anyhow::bail!(
+            "internal error: emit_key called for a key with double_tap set — \
+             this should have been handled by the tap-dance table lookup"
+        );
+    }
+
     match (&key.tap, &key.hold) {
         (Some(tap_a), Some(hold_a)) => {
             // Defensive collapse for any tap+hold pair the canonical pass missed.
@@ -269,7 +291,7 @@ fn resolve_layer(r: &LayerRef, layers: &LayerTable) -> anyhow::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::generate::{LayerEntry, LayerTable};
+    use crate::generate::{LayerEntry, LayerTable, TapDanceTable};
     use crate::schema::canonical::{CanonicalKey, CanonicalLayer};
     use crate::schema::geometry;
     use crate::schema::keycode::{Keycode, Modifier};
@@ -437,7 +459,7 @@ mod tests {
         let geom = geometry::get("voyager").unwrap();
         let layers = one_layer_table();
         let custom = CustomKeycodeTable::new();
-        let out = emit_keymap_c(&layout, geom, &layers, &custom).unwrap();
+        let out = emit_keymap_c(&layout, geom, &layers, &custom, &TapDanceTable::new()).unwrap();
         assert!(out.contains("LAYOUT_voyager"));
         assert!(out.contains("enum layers"));
         assert!(out.contains("[MAIN] = LAYOUT_voyager"));

@@ -120,13 +120,13 @@ recommended fix.
 
 ### `layer-name-collision`
 
-**Severity**: Error
+**Severity**: Warning
 
 **Catches**: Two layers whose titles sanitize to the same C identifier. For example, `"Sym + Num"` and `"Sym Num"` both sanitize to `SYM_NUM`.
 
-**Why bad**: The generator can't produce a valid `enum layers` with duplicate names; build fails.
+**Why bad**: The codegen auto-disambiguates colliding layer names by appending the layer position (e.g. LAYER_1, LAYER_2). This works, but unique layer names improve readability of the generated C code.
 
-**Recommended fix**: Rename one of the colliding layers in Oryx (or `layout.toml`) so their sanitized identifiers differ.
+**Recommended fix**: Rename the colliding layers in Oryx (or `layout.toml`) to have distinct names so the generated enum members are self-documenting.
 
 ---
 

@@ -247,7 +247,11 @@ mod tests {
         let raw = include_str!("../../examples/voyager-dvorak/kb.toml");
         let cfg: KbToml = toml::from_str(raw).expect("example kb.toml parses");
         assert_eq!(cfg.layout.geometry, "voyager");
-        assert_eq!(cfg.layout.hash_id.as_deref(), Some("yrbLx"));
+        assert!(cfg.layout.local.is_some(), "example should use local mode");
+        assert!(
+            cfg.layout.hash_id.is_none(),
+            "example should not have hash_id in local mode"
+        );
     }
 
     #[test]
