@@ -23,3 +23,6 @@ result-*
 # local env
 .env
 .env.local
+
+# scratch files
+debug_parse.rs

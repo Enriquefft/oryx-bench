@@ -3,6 +3,7 @@
 One person orchestrating AI agent swarms is equivalent to 10+ senior engineers working in parallel. Labor is solved. The bottleneck is **what to build and how to structure it** — not whether we have the hands to build it.
 
 This means: never cut a corner because "it would take too long." Never pick the easy path over the correct path. Never ship something half-done because of timeline pressure. The only valid reason to simplify is that simpler is *better*, not that simpler is *faster*.
+
 ### Perfection is the target.
 
 We are not shipping an MVP. We are not racing to market. We are building the thing that, when someone uses it, they say: *"this is how it should have always worked."*

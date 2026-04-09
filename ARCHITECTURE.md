@@ -772,6 +772,87 @@ source files QMK consumes. Three sub-modules:
 - `rules_mk.rs` — emits `rules.mk` additions from features.toml + walks
   `overlay/` for `*.zig` and `*.c` to add to `SRC +=`
 
+### Tap dance support
+
+QMK's tap dance feature lets a single physical key behave differently based on
+how many times it is tapped. The most common use case is "tap once for X, tap
+twice quickly for Y." Oryx exposes this as the `double_tap` field on each key.
+
+In oryx-bench, tap dances are not a Tier 1 feature the user declares in
+`features.toml`. They are inferred from the visual layout: any key with a
+non-null `double_tap` field becomes a tap dance entry at codegen time. The
+user never writes tap-dance C by hand.
+
+#### Pipeline
+
+A `double_tap` key flows through five stages:
+
+1. **Canonical schema** (`src/schema/canonical.rs`). `CanonicalKey.double_tap`
+   is an `Option<CanonicalAction>` — the same action type used for `tap` and
+   `hold`. Both parsers (Oryx and local mode) populate it from the
+   corresponding source field. A key can have `double_tap` alone, or `tap` +
+   `double_tap`, or other combinations. Not all combinations are valid (see
+   "Supported combinations" below).
+
+2. **Table builder** (`src/generate/mod.rs`). `build_tap_dance_table()` scans
+   every layer for keys with `double_tap` set and assigns each a unique
+   0-based `td_index`. Each `TapDanceEntry` records the layer position, key
+   index, single-tap action (if any), and double-tap action. The table is a
+   `Vec<TapDanceEntry>`, not a map — index assignment is sequential and
+   deterministic.
+
+3. **Keymap emission** (`src/generate/keymap.rs`). When emitting the
+   `LAYOUT(...)` array, the codegen checks whether the current key has an
+   entry in the tap-dance table. If it does, it emits `TD(n)` instead of the
+   normal keycode token. A defensive guard in `emit_key()` rejects any key
+   that still has `double_tap` set at emission time — such keys must be
+   intercepted by the tap-dance table lookup, and reaching `emit_key()` means
+   the table lookup was skipped (an internal bug).
+
+4. **Features emission** (`src/generate/features.rs`). Two outputs:
+   - `_features.h`: declares `enum tap_dance_ids { TD_0, TD_1, ... }` and
+     `extern tap_dance_action_t tap_dance_actions[]` so `keymap.c` can
+     reference both. The enum is only emitted when the table is non-empty.
+   - `_features.c`: defines `tap_dance_actions[]` with one
+     `ACTION_TAP_DANCE_DOUBLE(single, double)` per entry. The single-tap
+     argument comes from the key's `tap` field (or `KC_NO` if absent); the
+     double-tap argument comes from `double_tap`.
+
+5. **rules.mk** (`src/generate/rules_mk.rs`). `TAP_DANCE_ENABLE = yes` is
+   auto-enabled when the tap-dance table is non-empty, regardless of whether
+   the user declared it in `[features]`. If the user explicitly set
+   `tap_dance = true` in features, the normal feature-flag path handles it
+   and no duplicate line is emitted.
+
+#### Supported combinations
+
+QMK's `ACTION_TAP_DANCE_DOUBLE(kc1, kc2)` only handles two outcomes (single
+tap, double tap). This limits which `CanonicalKey` field combinations can be
+translated:
+
+| Fields present | Generated C | Notes |
+|---|---|---|
+| `double_tap` only | `ACTION_TAP_DANCE_DOUBLE(KC_NO, action)` | Single-tap does nothing; double-tap fires `action`. |
+| `tap` + `double_tap` | `ACTION_TAP_DANCE_DOUBLE(tap_action, double_action)` | Single tap fires `tap_action`; double tap fires `double_action`. |
+| `hold` + `double_tap` (no `tap`) | **Build error** | Requires `ACTION_TAP_DANCE_FN_ADVANCED` (three outcomes: nothing / hold / double-tap). Not yet supported. |
+| `tap` + `hold` + `double_tap` | **Build error** | Three-way conflict. QMK has no built-in action that combines hold-tap semantics with tap-dance counting. |
+| `tap_hold` + `double_tap` | **Build error** | `tap_hold` (Oryx's "also send on hold" feature) has no QMK equivalent at all when combined with tap dance. |
+
+The errors are loud (`anyhow::bail!`) with messages that identify the layer
+name, key position, and which combination is unsupported. Silent drops are
+never acceptable — a key that the user sees in Oryx doing one thing but the
+firmware silently ignores is a correctness bug.
+
+#### Guard: explicit opt-out
+
+If the user has `tap_dance = false` in `[features]` but the layout contains
+keys with `double_tap`, the generated firmware would be broken: `TD(n)`
+macros would be emitted into `keymap.c` but `TAP_DANCE_ENABLE` would be `no`,
+causing a QMK compile error. The codegen catches this before writing any
+files and fails with an explicit message telling the user to either remove
+the `tap_dance = false` setting or remove the `double_tap` keys from the
+layout.
+
 ### Codegen contract — what round-trips and what doesn't
 
 The `tests/codegen_roundtrip.rs` test asserts: `revision.json → keymap.c
@@ -839,9 +920,10 @@ Rules:
 4. Strip leading/trailing underscores
 5. Prefix with `L_` if the result starts with a digit
 
-If two layers sanitize to the same identifier, lint errors with
-`layer_name_collision` and refuses to build until the user renames one
-in Oryx.
+If two layers sanitize to the same identifier, the codegen auto-disambiguates
+by appending the layer position (e.g. `LAYER_1`, `LAYER_2`). The
+`layer_name_collision` lint fires as a **Warning** recommending unique names
+for readability, but the build succeeds regardless.
 
 ### `src/render/` — visualization
 
@@ -877,7 +959,6 @@ Cross-tier rules are first-class:
 | `custom_keycode_undefined` | Oryx visual layout binds USER03 but no overlay file defines it |
 | `unreferenced_custom_keycode` | Overlay defines `CK_EMAIL` but no visual layout binds USER01 |
 | `process_record_user_collision` | Two overlay files (or features.toml-generated + a hand-written `.zig`) both define `process_record_user` without a clear ownership marker |
-| `config_redefine_without_undef` | `overlay/config.append.h` defines a macro Oryx already set, without `#undef` first |
 
 ### `src/build/` — the build pipeline (v0.1: docker-only)
 
@@ -985,10 +1066,6 @@ backend    = "docker"       # v0.1: docker (or "auto", which resolves to docker)
 qmk_pin    = "auto"         # "auto" uses the docker image's bundled fork; or a commit SHA
 zig_pin    = "auto"         # same — pinned per docker image release
 
-[flash]
-backend  = "auto"           # auto | wally | keymapp
-dry_run  = false            # default for flash; CLI --dry-run overrides
-
 [sync]
 auto_pull       = "on_read" # on_read | on_demand | never
 poll_interval_s = 60        # cap how often we check Oryx for updates
@@ -997,12 +1074,6 @@ warn_if_stale_s = 86400     # 1 day — surface a hint in `status` if no full pu
 [lint]
 ignore = []                 # list of rule IDs to silence (e.g. ["mod-tap-on-vowel"])
 strict = false              # treat warnings as errors
-
-[render]
-default_layer = "Main"      # what `oryx-bench show` (no args) renders
-
-[skill]
-auto_install = "prompt"     # prompt | always | never — what `init` does about the project-local skill
 ```
 
 ### Revision pinning semantics
