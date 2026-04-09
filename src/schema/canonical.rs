@@ -434,6 +434,7 @@ fn oryx_key_to_canonical(k: &oryx::Key) -> CanonicalKey {
     // - tap=KC_X + hold=MO(N)        → tap=LT(N, X), hold=None
     // - tap=KC_X + hold=Modifier(M)  → tap=ModTap{M, X}, hold=None
     // - tap=KC_X + hold=KC_<MOD>     → tap=ModTap{M, X}, hold=None  (Oryx may emit this shape)
+    // - tap=X + hold=X               → tap=X, hold=None              (redundant identity)
     let (tap, hold) = match (tap, hold) {
         (Some(CanonicalAction::Keycode(kc)), Some(CanonicalAction::Mo { layer })) => (
             Some(CanonicalAction::Lt {
@@ -449,6 +450,8 @@ fn oryx_key_to_canonical(k: &oryx::Key) -> CanonicalKey {
             }),
             None,
         ),
+        // Redundant: tap and hold are the same action → collapse to tap-only.
+        (Some(a), Some(b)) if a == b => (Some(a), None),
         other => other,
     };
 
