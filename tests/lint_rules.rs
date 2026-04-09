@@ -239,7 +239,8 @@ fn layer_name_collision_fires() {
     layout.layers[0].name = "Sym+Num".into();
     layout.layers[1].name = "Sym Num".into();
     let issues = lint::run_all(&layout, &project).unwrap();
-    assert!(issues.iter().any(|i| i.rule_id == "layer-name-collision"));
+    let issue = issues.iter().find(|i| i.rule_id == "layer-name-collision").expect("rule should fire");
+    assert_eq!(issue.severity, Severity::Warning, "collision is now auto-resolved by codegen; severity should be Warning");
 }
 
 #[test]

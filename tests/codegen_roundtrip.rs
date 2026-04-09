@@ -141,6 +141,24 @@ fn structural_round_trip_against_fixture() {
         for (qmk_pos, arg) in args.iter().enumerate() {
             let canonical_idx = qmk_order[qmk_pos];
             let key = &layer.keys[canonical_idx];
+
+            // Double-tap keys are emitted as TD(n) by the codegen, where n
+            // is a tap-dance index assigned at generation time. The round-trip
+            // test cannot know the index from the canonical side, so we match
+            // the pattern instead of comparing an exact string.
+            if key.double_tap.is_some() {
+                let looks_like_td = arg.starts_with("TD(")
+                    && arg.ends_with(')')
+                    && arg[3..arg.len() - 1].chars().all(|c| c.is_ascii_digit())
+                    && !arg[3..arg.len() - 1].is_empty();
+                assert!(
+                    looks_like_td,
+                    "block {block_ident}: QMK pos {qmk_pos} (canonical idx {canonical_idx}) — \
+                     key has double_tap, expected generated cell to match `TD(n)`, got `{arg}`"
+                );
+                continue;
+            }
+
             let expected = render_key(key);
             assert_eq!(
                 arg, &expected,
@@ -190,6 +208,9 @@ fn render_key(key: &oryx_bench::schema::canonical::CanonicalKey) -> String {
             LayerRef::Index(i) => i.to_string(),
         }
     }
+    // double_tap keys are handled in the caller: the comparison loop
+    // matches them against the TD(\d+) pattern directly, so render_key
+    // is never called for keys that have double_tap set.
     match (&key.tap, &key.hold) {
         (Some(t), Some(h)) => {
             let synthetic = match (t, h) {
