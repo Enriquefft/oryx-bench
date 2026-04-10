@@ -20,7 +20,7 @@ fn render_layer_by_name(name: &str, opts: RenderOptions) -> String {
         .iter()
         .find(|l| l.name == name)
         .unwrap_or_else(|| panic!("no layer named {name}"));
-    render::ascii::render_layer(geom, layer, &opts)
+    render::ascii::render_layer(geom, layer, &layout.layers, &opts)
 }
 
 #[test]

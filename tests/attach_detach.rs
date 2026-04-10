@@ -11,6 +11,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use oryx_bench::commands::{attach, detach, init};
 use oryx_bench::config::Project;
+use oryx_bench::schema::kb_toml::AutoPull;
 
 const FIXTURE_HASH: &str = "XX44B";
 
@@ -84,6 +85,13 @@ async fn attach_converts_local_to_oryx_mode_and_pulls() {
     let project = Project::load_at(td.path()).unwrap();
     assert!(project.is_oryx_mode());
     assert!(!project.is_local_mode());
+    // Attach must restore auto_pull to the Oryx-mode default so the
+    // detach→attach round-trip doesn't leave sync silently disabled.
+    assert_eq!(
+        project.cfg.sync.auto_pull,
+        AutoPull::OnRead,
+        "attach should restore auto_pull to on_read"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -126,6 +134,13 @@ async fn detach_converts_oryx_to_local_and_renders_layout_toml() {
     let project = Project::load_at(td.path()).unwrap();
     assert!(project.is_local_mode());
     assert!(!project.is_oryx_mode());
+    // Sync settings should be neutralized: auto_pull = "never" since
+    // there's no Oryx source to sync with after detach.
+    assert_eq!(
+        project.cfg.sync.auto_pull,
+        AutoPull::Never,
+        "detach should set auto_pull to never"
+    );
 
     // Sanity-check that the rendered layout.toml round-trips through the parser.
     let raw = fs::read_to_string(td.path().join("layout.toml")).unwrap();

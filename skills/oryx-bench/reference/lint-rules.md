@@ -12,7 +12,7 @@ recommended fix.
 
 ### `lt-on-high-freq`
 
-**Severity**: Error
+**Severity**: Error (Warning in Oryx mode)
 
 **Catches**: Layer-tap (`LT(layer, key)`) where `key` is one of `KC_BSPC`, `KC_SPC`, `KC_ENT`, `KC_DEL`, `KC_TAB`, or `KC_ESC`.
 
@@ -120,13 +120,13 @@ recommended fix.
 
 ### `layer-name-collision`
 
-**Severity**: Warning
+**Severity**: Warning (Info in Oryx mode)
 
 **Catches**: Two layers whose titles sanitize to the same C identifier. For example, `"Sym + Num"` and `"Sym Num"` both sanitize to `SYM_NUM`.
 
-**Why bad**: The codegen auto-disambiguates colliding layer names by appending the layer position (e.g. LAYER_1, LAYER_2). This works, but unique layer names improve readability of the generated C code.
+**Why bad**: Layer references in `layout.toml` (e.g. `LT(Layer, KC_ENT)`) use the original name. When two layers share a name, the reference is ambiguous — codegen can only resolve it to one of them. The generated C enum is auto-disambiguated (`LAYER_1`, `LAYER_2`), but the `layout.toml` name lookup silently picks one, and the other layer becomes unreferenceable by name.
 
-**Recommended fix**: Rename the colliding layers in Oryx (or `layout.toml`) to have distinct names so the generated enum members are self-documenting.
+**Recommended fix**: Rename the colliding layers in `layout.toml` to have distinct names (e.g. `Symbols`, `Nav`). In Oryx mode, rename them in the Oryx UI and re-pull.
 
 ---
 

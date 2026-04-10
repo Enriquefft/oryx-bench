@@ -250,20 +250,54 @@ impl CanonicalKey {
     }
 }
 
-/// Recursive matcher: handles `Keycode`, `Modifier`, and the wrapper
-/// variants (`Lt`, `ModTap`, `Modified`).
+/// Recursive matcher: handles `Keycode`, `Modifier`, the wrapper
+/// variants (`Lt`, `ModTap`, `Modified`), and layer-switch actions
+/// (`Mo`, `Tg`, `To`, `Tt`, `Df`) — matching both the action type
+/// name (e.g. "TO", "MO") and the layer name.
 fn action_matches_keycode_name(action: &CanonicalAction, want: &str) -> bool {
+    // Strip KC_ prefix for comparisons — the user might type "TO" or
+    // "KC_TO", "MO" or "KC_MO".
+    let bare = want
+        .strip_prefix("KC_")
+        .or_else(|| want.strip_prefix("kc_"))
+        .unwrap_or(want);
+
     match action {
         CanonicalAction::Keycode(k) => k.canonical_name().eq_ignore_ascii_case(want),
         CanonicalAction::Modifier(m) => {
             let qmk = format!("KC_{}", m.canonical_name());
             qmk.eq_ignore_ascii_case(want) || m.canonical_name().eq_ignore_ascii_case(want)
         }
-        CanonicalAction::Lt { tap, .. } | CanonicalAction::ModTap { tap, .. } => {
-            action_matches_keycode_name(tap, want)
+        CanonicalAction::Lt { layer, tap } => {
+            bare.eq_ignore_ascii_case("LT")
+                || layer_ref_matches(layer, bare)
+                || action_matches_keycode_name(tap, want)
         }
+        CanonicalAction::ModTap { tap, .. } => action_matches_keycode_name(tap, want),
         CanonicalAction::Modified { base, .. } => action_matches_keycode_name(base, want),
+        CanonicalAction::Mo { layer } => {
+            bare.eq_ignore_ascii_case("MO") || layer_ref_matches(layer, bare)
+        }
+        CanonicalAction::Tg { layer } => {
+            bare.eq_ignore_ascii_case("TG") || layer_ref_matches(layer, bare)
+        }
+        CanonicalAction::To { layer } => {
+            bare.eq_ignore_ascii_case("TO") || layer_ref_matches(layer, bare)
+        }
+        CanonicalAction::Tt { layer } => {
+            bare.eq_ignore_ascii_case("TT") || layer_ref_matches(layer, bare)
+        }
+        CanonicalAction::Df { layer } => {
+            bare.eq_ignore_ascii_case("DF") || layer_ref_matches(layer, bare)
+        }
         _ => false,
+    }
+}
+
+fn layer_ref_matches(r: &LayerRef, want: &str) -> bool {
+    match r {
+        LayerRef::Name(n) => n.eq_ignore_ascii_case(want),
+        LayerRef::Index(i) => want == i.to_string(),
     }
 }
 
@@ -278,11 +312,23 @@ impl CanonicalLayout {
                 keys: layer.keys.iter().map(oryx_key_to_canonical).collect(),
             });
         }
-        // Second pass: resolve numeric `layer` indices to names where possible.
-        let index_to_name: Vec<(u8, String)> = layers
+        // Disambiguate duplicate layer names before resolving index-based
+        // references to name-based ones. Oryx doesn't enforce unique layer
+        // titles (the default is "Layer" for every layer the user hasn't
+        // renamed). If we leave duplicates in place, index→name resolution
+        // produces identical LayerRef::Name values for different layers,
+        // making them indistinguishable — codegen silently misroutes LT/MO
+        // references and layout.toml can't round-trip.
+        let mut index_to_name: Vec<(u8, String)> = layers
             .iter()
             .map(|l| (l.position, l.name.clone()))
             .collect();
+        disambiguate_layer_names(&mut index_to_name);
+        for layer in &mut layers {
+            if let Some((_, new_name)) = index_to_name.iter().find(|(p, _)| *p == layer.position) {
+                layer.name.clone_from(new_name);
+            }
+        }
         for layer in &mut layers {
             for key in &mut layer.keys {
                 for action in [
@@ -426,6 +472,53 @@ fn resolve_layer_refs(action: &mut CanonicalAction, idx_to_name: &[(u8, String)]
         CanonicalAction::ModTap { tap, .. } => resolve_layer_refs(tap, idx_to_name),
         CanonicalAction::Modified { base, .. } => resolve_layer_refs(base, idx_to_name),
         _ => {}
+    }
+}
+
+/// Ensure every layer name in `index_to_name` is unique. When Oryx
+/// assigns the same title to multiple layers (e.g. two layers both called
+/// "Layer"), append `_<position>` to each collision member. If the
+/// resulting candidate itself collides with an existing name, increment
+/// the suffix until a free slot is found — same strategy codegen's
+/// `build_layer_table` uses for C identifiers.
+fn disambiguate_layer_names(index_to_name: &mut [(u8, String)]) {
+    use std::collections::{HashMap, HashSet};
+
+    // Count how many times each name appears.
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for (_, name) in index_to_name.iter() {
+        *counts.entry(name.as_str()).or_default() += 1;
+    }
+    let colliding: HashSet<String> = counts
+        .into_iter()
+        .filter(|(_, count)| *count > 1)
+        .map(|(name, _)| name.to_string())
+        .collect();
+    if colliding.is_empty() {
+        return;
+    }
+
+    // Seed the "already taken" set with names that are NOT part of a
+    // collision group — these must never be clobbered by a suffix.
+    let mut assigned: HashSet<String> = index_to_name
+        .iter()
+        .filter(|(_, n)| !colliding.contains(n))
+        .map(|(_, n)| n.clone())
+        .collect();
+
+    for (pos, name) in index_to_name.iter_mut() {
+        if !colliding.contains(name.as_str()) {
+            continue;
+        }
+        let base = name.clone();
+        let mut candidate = format!("{}_{}", base, pos);
+        let mut counter = *pos as usize;
+        while assigned.contains(&candidate) {
+            counter += 1;
+            candidate = format!("{}_{}", base, counter);
+        }
+        assigned.insert(candidate.clone());
+        *name = candidate;
     }
 }
 
@@ -1005,5 +1098,66 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("99"), "expected 99 in error: {msg}");
         assert!(msg.contains("matches neither"));
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // disambiguate_layer_names
+    // ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn disambiguate_no_op_when_unique() {
+        let mut table = vec![
+            (0u8, "Main".into()),
+            (1, "Sym+Num".into()),
+            (2, "Gaming".into()),
+        ];
+        disambiguate_layer_names(&mut table);
+        assert_eq!(table[0].1, "Main");
+        assert_eq!(table[1].1, "Sym+Num");
+        assert_eq!(table[2].1, "Gaming");
+    }
+
+    #[test]
+    fn disambiguate_appends_position_on_collision() {
+        let mut table = vec![
+            (0u8, "Main".into()),
+            (1, "Layer".into()),
+            (2, "Layer".into()),
+        ];
+        disambiguate_layer_names(&mut table);
+        assert_eq!(table[0].1, "Main");
+        assert_eq!(table[1].1, "Layer_1");
+        assert_eq!(table[2].1, "Layer_2");
+    }
+
+    #[test]
+    fn disambiguate_skips_non_colliding_third_name() {
+        let mut table = vec![
+            (0u8, "Layer".into()),
+            (1, "Layer".into()),
+            (2, "Nav".into()),
+        ];
+        disambiguate_layer_names(&mut table);
+        assert_eq!(table[0].1, "Layer_0");
+        assert_eq!(table[1].1, "Layer_1");
+        assert_eq!(table[2].1, "Nav");
+    }
+
+    #[test]
+    fn disambiguate_avoids_collision_with_existing_name() {
+        // "Layer_1" already exists as a non-colliding name, so the
+        // collision resolver must skip it.
+        let mut table = vec![
+            (0u8, "Main".into()),
+            (1, "Layer".into()),
+            (2, "Layer".into()),
+            (3, "Layer_1".into()),
+        ];
+        disambiguate_layer_names(&mut table);
+        assert_eq!(table[0].1, "Main");
+        // Position 1 wants "Layer_1" but it's taken → increments to "Layer_2"
+        assert_eq!(table[1].1, "Layer_2");
+        assert_eq!(table[2].1, "Layer_3");
+        assert_eq!(table[3].1, "Layer_1"); // unchanged
     }
 }

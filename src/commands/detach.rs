@@ -13,7 +13,7 @@ use clap::Parser;
 
 use crate::config::Project;
 use crate::schema::canonical::CanonicalLayout;
-use crate::schema::kb_toml::LocalLayout;
+use crate::schema::kb_toml::{AutoPull, LocalLayout};
 use crate::schema::layout;
 use crate::schema::oryx;
 use crate::util::fs as fsx;
@@ -76,6 +76,12 @@ pub fn run(args: Args, project_override: Option<PathBuf>) -> Result<ExitCode> {
     cfg.layout.local = Some(LocalLayout {
         file: "layout.toml".to_string(),
     });
+    // Sync settings are Oryx-specific; set auto_pull to "never" so the
+    // config doesn't misleadingly reference a sync source that no longer
+    // exists. The other sync fields (poll_interval_s, warn_if_stale_s)
+    // are inert without auto_pull, but we leave them at their current
+    // values so they survive a future `attach` round-trip.
+    cfg.sync.auto_pull = AutoPull::Never;
     let new_kb = toml::to_string_pretty(&cfg).context("re-serializing kb.toml")?;
 
     // Destructive phase. Each step below is crash-safe on its own

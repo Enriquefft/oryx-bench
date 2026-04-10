@@ -9,6 +9,11 @@ use oryx_bench::schema::keycode::{Keycode, Modifier};
 use tempfile::TempDir;
 
 fn test_project_with_features(features: &str) -> (TempDir, Project) {
+    test_oryx_project_with_features(features)
+}
+
+/// Create an Oryx-mode (pre-detach) test project.
+fn test_oryx_project_with_features(features: &str) -> (TempDir, Project) {
     let td = TempDir::new().unwrap();
     let root = td.path();
     std::fs::write(
@@ -19,6 +24,29 @@ geometry = "voyager"
 "#,
     )
     .unwrap();
+    std::fs::create_dir_all(root.join("overlay")).unwrap();
+    std::fs::write(root.join("overlay/features.toml"), features).unwrap();
+    let project = Project::load_at(root).unwrap();
+    (td, project)
+}
+
+/// Create a local-mode (post-detach) test project.
+fn test_local_project_with_features(features: &str) -> (TempDir, Project) {
+    let td = TempDir::new().unwrap();
+    let root = td.path();
+    std::fs::write(
+        root.join("kb.toml"),
+        r#"[layout]
+geometry = "voyager"
+
+[layout.local]
+file = "layout.toml"
+"#,
+    )
+    .unwrap();
+    // The file doesn't need real content — lint receives the layout
+    // as a parameter, not from disk.
+    std::fs::write(root.join("layout.toml"), "").unwrap();
     std::fs::create_dir_all(root.join("overlay")).unwrap();
     std::fs::write(root.join("overlay/features.toml"), features).unwrap();
     let project = Project::load_at(root).unwrap();
@@ -74,6 +102,38 @@ fn lt_on_high_freq_does_not_fire_on_letter() {
     };
     let issues = lint::run_all(&layout, &project).unwrap();
     assert!(!issues.iter().any(|i| i.rule_id == "lt-on-high-freq"));
+}
+
+#[test]
+fn lt_on_high_freq_error_in_local_mode() {
+    let (_td, project) = test_local_project_with_features("");
+    let mut layout = basic_layout();
+    layout.layers[0].keys[51] = CanonicalKey {
+        tap: Some(CanonicalAction::Lt {
+            layer: LayerRef::Name("SymNum".into()),
+            tap: Box::new(CanonicalAction::Keycode(Keycode::KcBspc)),
+        }),
+        ..Default::default()
+    };
+    let issues = lint::run_all(&layout, &project).unwrap();
+    let issue = issues.iter().find(|i| i.rule_id == "lt-on-high-freq").expect("rule should fire");
+    assert_eq!(issue.severity, Severity::Error, "local mode uses default severity");
+}
+
+#[test]
+fn lt_on_high_freq_downgraded_to_warning_in_oryx_mode() {
+    let (_td, project) = test_oryx_project_with_features("");
+    let mut layout = basic_layout();
+    layout.layers[0].keys[51] = CanonicalKey {
+        tap: Some(CanonicalAction::Lt {
+            layer: LayerRef::Name("SymNum".into()),
+            tap: Box::new(CanonicalAction::Keycode(Keycode::KcBspc)),
+        }),
+        ..Default::default()
+    };
+    let issues = lint::run_all(&layout, &project).unwrap();
+    let issue = issues.iter().find(|i| i.rule_id == "lt-on-high-freq").expect("rule should fire");
+    assert_eq!(issue.severity, Severity::Warning, "Oryx mode downgrades to warning pre-detach");
 }
 
 #[test]
@@ -232,15 +292,26 @@ fn home_row_mods_asymmetric_fires_on_left_only() {
 }
 
 #[test]
-fn layer_name_collision_fires() {
-    let (_td, project) = test_project_with_features("");
+fn layer_name_collision_fires_warning_in_local_mode() {
+    let (_td, project) = test_local_project_with_features("");
     let mut layout = basic_layout();
     // Both sanitize to "SYMNUM"
     layout.layers[0].name = "Sym+Num".into();
     layout.layers[1].name = "Sym Num".into();
     let issues = lint::run_all(&layout, &project).unwrap();
     let issue = issues.iter().find(|i| i.rule_id == "layer-name-collision").expect("rule should fire");
-    assert_eq!(issue.severity, Severity::Warning, "collision is now auto-resolved by codegen; severity should be Warning");
+    assert_eq!(issue.severity, Severity::Warning, "local mode uses default severity");
+}
+
+#[test]
+fn layer_name_collision_downgraded_to_info_in_oryx_mode() {
+    let (_td, project) = test_oryx_project_with_features("");
+    let mut layout = basic_layout();
+    layout.layers[0].name = "Layer".into();
+    layout.layers[1].name = "Layer".into();
+    let issues = lint::run_all(&layout, &project).unwrap();
+    let issue = issues.iter().find(|i| i.rule_id == "layer-name-collision").expect("rule should fire");
+    assert_eq!(issue.severity, Severity::Info, "Oryx defaults cause collisions; downgraded to info pre-detach");
 }
 
 #[test]

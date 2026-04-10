@@ -42,6 +42,23 @@ pub fn run(args: Args, project_override: Option<PathBuf>) -> Result<ExitCode> {
         bail!("`git` not on PATH — diff requires git");
     }
 
+    // Verify we're inside a git repo before touching any git commands.
+    // Without this, `git rev-parse --verify HEAD^{commit}` would fail
+    // with "unknown git revision 'HEAD'" which is misleading — the real
+    // issue is there's no repo, not that HEAD is unknown.
+    let inside_repo = Command::new("git")
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .current_dir(&project.root)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .context("invoking git rev-parse --is-inside-work-tree")?;
+    if !inside_repo.success() {
+        bail!(
+            "not a git repository — diff compares the working tree against a git ref and requires version history"
+        );
+    }
+
     // Visual layout: read both versions.
     let (old_layout, new_layout) = load_both_layouts(&project, git_ref)?;
     diff_layouts(&old_layout, &new_layout, args.layer.as_deref())?;
@@ -67,7 +84,7 @@ fn load_both_layouts(
 ) -> Result<(CanonicalLayout, CanonicalLayout)> {
     if project.is_oryx_mode() {
         let old_raw = git_show(&project.root, git_ref, "pulled/revision.json")?
-            .ok_or_else(|| anyhow::anyhow!("pulled/revision.json missing in {git_ref}"))?;
+            .ok_or_else(|| anyhow::anyhow!("pulled/revision.json not found at {git_ref} — commit it first, then diff will have a baseline to compare against"))?;
         let old_oryx: oryx::Layout = serde_json::from_str(&old_raw)
             .with_context(|| format!("parsing pulled/revision.json at {git_ref}"))?;
         let old = CanonicalLayout::from_oryx(&old_oryx)?;
@@ -83,7 +100,7 @@ fn load_both_layouts(
             .display()
             .to_string();
         let old_raw = git_show(&project.root, git_ref, &rel)?
-            .ok_or_else(|| anyhow::anyhow!("{rel} missing in {git_ref}"))?;
+            .ok_or_else(|| anyhow::anyhow!("{rel} not found at {git_ref} — commit it first, then diff will have a baseline to compare against"))?;
         let old_file: LayoutFile = toml::from_str(&old_raw)?;
         let old = CanonicalLayout::from_local(&old_file)?;
 

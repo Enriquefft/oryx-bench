@@ -65,7 +65,7 @@ struct GqlResp<T> {
 
 #[derive(Deserialize)]
 struct MetadataPayload {
-    layout: MetadataLayout,
+    layout: Option<MetadataLayout>,
 }
 
 #[derive(Deserialize)]
@@ -141,7 +141,10 @@ pub fn metadata_query(hash_id: &str, geometry: &str, revision_id: &str) -> Resul
     let data = resp
         .data
         .ok_or_else(|| PullError::GraphQl("no data field in response".into()))?;
-    Ok(data.layout.revision.hash_id)
+    let layout = data.layout.ok_or_else(|| PullError::LayoutNotFound {
+        hash_id: hash_id.to_owned(),
+    })?;
+    Ok(layout.revision.hash_id)
 }
 
 /// Issue the full layout query. Returns the JSON `layout` sub-object the
@@ -166,10 +169,10 @@ pub fn full_layout_query(
     let data = resp
         .data
         .ok_or_else(|| PullError::GraphQl("no data field in response".into()))?;
-    let layout = data
-        .get("layout")
-        .cloned()
-        .ok_or_else(|| PullError::GraphQl("no layout field in data".into()))?;
+    let layout = match data.get("layout") {
+        Some(v) if !v.is_null() => v.clone(),
+        _ => return Err(PullError::LayoutNotFound { hash_id: hash_id.to_owned() }.into()),
+    };
     Ok(layout)
 }
 

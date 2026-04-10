@@ -1,11 +1,12 @@
 ---
 source: tests/render_snapshot.rs
+assertion_line: 41
 expression: out
 ---
-|KC_NO  |RGB_TOG|TOGGLE…|RGB_MOD|RGB_VAD|RGB_VAI|    |KC_TRNS|KC_TRNS|KC_TRNS|KC_TRNS|KC_TRNS|QK_BOOT|
-|KC_TRNS|KC_TRNS|KC_VOLD|KC_VOLU|KC_MUTE|RGB_SLD|    |KC_PGUP|KC_HOME|KC_UP  |KC_END |KC_TRNS|KC_TRNS|
-|KC_TRNS|KC_MPRV|KC_MNXT|KC_MSTP|KC_MPLY|KC_TRNS|    |KC_PGDN|KC_LEFT|KC_DOWN|KC_RIG…|KC_TRNS|KC_TRNS|
-|KC_TRNS|KC_TRNS|KC_TRNS|RGB    |RGB    |RGB    |    |KC_TRNS|LCTL(L…|LCTL(K…|KC_TRNS|KC_TRNS|KC_TRNS|
+|       |RTOG   |TOGGLE…|RMOD   |RVAD   |RVAI   |    |TRNS   |TRNS   |TRNS   |TRNS   |TRNS   |BOOT   |
+|TRNS   |TRNS   |VOLD   |VOLU   |MUTE   |RGB_SLD|    |PGUP   |HOME   |UP     |END    |TRNS   |TRNS   |
+|TRNS   |MPRV   |MNXT   |MSTP   |MPLY   |TRNS   |    |PGDN   |LEFT   |DOWN   |RGHT   |TRNS   |TRNS   |
+|TRNS   |TRNS   |TRNS   |RGB    |RGB    |RGB    |    |TRNS   |LC+LS(…|LC(TAB)|TRNS   |TRNS   |TRNS   |
 
-                                 |KC_TRNS|    |KC_NO  |
-                                 |KC_NO  |    |KC_TRNS|
+                                 |TRNS   |    |       |
+                                 |       |    |TRNS   |

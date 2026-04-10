@@ -63,6 +63,8 @@ pub enum PullError {
     GraphQl(String),
     #[error("network error talking to Oryx: {0}")]
     Network(#[from] reqwest::Error),
+    #[error("layout '{hash_id}' not found on Oryx")]
+    LayoutNotFound { hash_id: String },
     #[error("could not parse Oryx response: {0}")]
     Parse(#[from] serde_json::Error),
     #[error(

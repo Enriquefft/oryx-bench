@@ -1,11 +1,12 @@
 ---
 source: tests/render_snapshot.rs
+assertion_line: 35
 expression: out
 ---
-|KC_TAB |KC_F1  |KC_F2  |KC_F3  |KC_F4  |KC_F5  |    |KC_F6  |KC_F7  |KC_F8  |KC_F9  |KC_F10 |KC_F11 |
-|KC_NO  |KC_EXLM|KC_AT  |KC_HASH|KC_DLR |KC_PERC|    |KC_7   |KC_8   |KC_9   |KC_MIN…|KC_LBRC|KC_RBRC|
-|KC_TRNS|KC_CIRC|KC_AMPR|KC_ASTR|KC_LPRN|KC_RPRN|    |KC_4   |KC_5   |KC_6   |KC_PLUS|KC_UP  |KC_BSPC|
-|KC_TRNS|KC_COLN|KC_LBRC|KC_RBRC|KC_LCBR|KC_RCBR|    |KC_1   |KC_2   |KC_3   |KC_LEFT|/KC_DO…|KC_RIG…|
+|TAB    |F1     |F2     |F3     |F4     |F5     |    |F6     |F7     |F8     |F9     |F10    |F11    |
+|       |EXLM   |AT     |HASH   |DLR    |PERC   |    |7      |8      |9      |MINS   |LBRC   |RBRC   |
+|TRNS   |CIRC   |AMPR   |ASTR   |LPRN   |RPRN   |    |4      |5      |6      |PLUS   |UP     |BSPC   |
+|TRNS   |COLN   |LBRC   |RBRC   |LCBR   |RCBR   |    |1      |2      |3      |LEFT   |/DOWN  |RGHT   |
 
-                                 |KC_TRNS|    |KC_TRNS|
-                                 |KC_NO  |    |KC_NO  |
+                                 |TRNS   |    |TRNS   |
+                                 |       |    |       |

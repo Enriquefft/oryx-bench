@@ -23,7 +23,10 @@ pub fn flash(firmware_path: &Path) -> Result<()> {
         .status()
         .with_context(|| format!("invoking wally-cli {}", firmware_path.display()))?;
     if !status.success() {
-        bail!("wally-cli exited with status {:?}", status.code());
+        let code = status
+            .code()
+            .map_or("killed by signal".to_string(), |c| c.to_string());
+        bail!("wally-cli exited with status {code}");
     }
     Ok(())
 }

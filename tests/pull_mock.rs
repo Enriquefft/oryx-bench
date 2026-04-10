@@ -188,6 +188,34 @@ async fn pull_now_surfaces_graphql_errors_field() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
+async fn pull_now_surfaces_layout_not_found_on_null() {
+    // When Oryx returns {"data": {"layout": null}} for a non-existent hash,
+    // the CLI should surface "layout '…' not found on Oryx" instead of a
+    // raw serde deserialization error.
+    let server = start_mock().await;
+    Mock::given(method("POST"))
+        .and(path("/graphql"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": { "layout": null }
+        })))
+        .mount(&server)
+        .await;
+
+    let td = TempDir::new().unwrap();
+    let project = mk_oryx_project(&td, "on_read", 60);
+    let err = tokio::task::spawn_blocking(move || pull::pull_now(&project, None, true))
+        .await
+        .unwrap()
+        .expect_err("should fail");
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("not found on Oryx"),
+        "expected 'not found on Oryx', got: {msg}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
 async fn pull_now_retries_transient_503_then_succeeds() {
     // Verifies that a 503 from Oryx (gateway flake) is silently retried
     // by the GraphQL client and the pull eventually succeeds. wiremock

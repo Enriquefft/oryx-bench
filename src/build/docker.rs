@@ -127,9 +127,12 @@ pub fn build(project: &Project, generated: &Generated, dry_run: bool) -> Result<
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
+        let code = output
+            .status
+            .code()
+            .map_or("killed by signal".to_string(), |c| c.to_string());
         bail!(
-            "docker build failed (exit {:?}):\nstderr:\n{stderr}\nstdout:\n{stdout}",
-            output.status.code()
+            "docker build failed (exit {code}):\nstderr:\n{stderr}\nstdout:\n{stdout}"
         );
     }
 

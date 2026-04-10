@@ -58,7 +58,7 @@ pub fn run(args: Args, project_override: Option<PathBuf>) -> Result<ExitCode> {
             else {
                 anyhow::bail!("no layer named '{want}' in current layout");
             };
-            println!("{}", render::ascii::render_layer(geom, layer, &opts));
+            println!("{}", render::ascii::render_layer(geom, layer, &layout.layers, &opts));
         }
         None => {
             for (i, layer) in layout.layers.iter().enumerate() {
@@ -66,7 +66,7 @@ pub fn run(args: Args, project_override: Option<PathBuf>) -> Result<ExitCode> {
                     println!();
                 }
                 println!("== {} (position {}) ==", layer.name, layer.position);
-                println!("{}", render::ascii::render_layer(geom, layer, &opts));
+                println!("{}", render::ascii::render_layer(geom, layer, &layout.layers, &opts));
             }
         }
     }

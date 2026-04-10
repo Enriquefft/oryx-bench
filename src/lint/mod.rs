@@ -59,8 +59,20 @@ pub trait LintRule: Send + Sync {
     /// Stable identifier (e.g. "lt-on-high-freq"). Used in CLI output and kb.toml ignore lists.
     fn id(&self) -> &'static str;
 
-    /// Default severity when the rule fires.
+    /// Default severity when the rule fires (local / post-detach mode).
     fn severity(&self) -> Severity;
+
+    /// Severity in Oryx mode (pre-detach). Rules whose flagged pattern is
+    /// a valid Oryx design choice or an Oryx default should override this
+    /// to return a softer severity. The user hasn't taken ownership of
+    /// the layout yet, so "error" (= will not build) is misleading for
+    /// patterns that compile fine in QMK.
+    ///
+    /// Defaults to [`severity()`](LintRule::severity) — most rules apply
+    /// uniformly regardless of mode.
+    fn oryx_severity(&self) -> Severity {
+        self.severity()
+    }
 
     /// One-sentence summary for the rule.
     fn description(&self) -> &'static str;
@@ -94,9 +106,19 @@ pub fn run_all(layout: &CanonicalLayout, project: &Project) -> anyhow::Result<Ve
         project,
         features: &features,
     };
+    let oryx_mode = project.is_oryx_mode();
     let mut all = Vec::new();
     for rule in rules::registry() {
-        all.extend(rule.check(&ctx));
+        let mut issues = rule.check(&ctx);
+        if oryx_mode {
+            let oryx_sev = rule.oryx_severity();
+            if oryx_sev != rule.severity() {
+                for issue in &mut issues {
+                    issue.severity = oryx_sev;
+                }
+            }
+        }
+        all.extend(issues);
     }
     Ok(all)
 }
@@ -116,7 +138,15 @@ pub fn gen_lint_rules_markdown() -> String {
     );
     for rule in rules::registry() {
         out.push_str(&format!("### `{}`\n\n", rule.id()));
-        out.push_str(&format!("**Severity**: {:?}\n\n", rule.severity()));
+        if rule.oryx_severity() != rule.severity() {
+            out.push_str(&format!(
+                "**Severity**: {:?} ({:?} in Oryx mode)\n\n",
+                rule.severity(),
+                rule.oryx_severity()
+            ));
+        } else {
+            out.push_str(&format!("**Severity**: {:?}\n\n", rule.severity()));
+        }
         out.push_str(&format!("**Catches**: {}\n\n", rule.description()));
         out.push_str(&format!("**Why bad**: {}\n\n", rule.why_bad()));
         out.push_str(&format!("**Recommended fix**: {}\n\n", rule.fix_example()));

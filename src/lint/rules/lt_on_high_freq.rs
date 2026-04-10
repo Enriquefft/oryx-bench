@@ -15,6 +15,12 @@ impl LintRule for Rule {
     fn severity(&self) -> Severity {
         Severity::Error
     }
+    fn oryx_severity(&self) -> Severity {
+        // LT on a high-frequency key is a valid Oryx design choice. The
+        // user configured it in the Oryx UI and it compiles fine in QMK.
+        // Only flag as an error once the user takes ownership (detach).
+        Severity::Warning
+    }
     fn description(&self) -> &'static str {
         "Layer-tap (`LT(layer, key)`) where `key` is one of `KC_BSPC`, `KC_SPC`, `KC_ENT`, `KC_DEL`, `KC_TAB`, or `KC_ESC`."
     }

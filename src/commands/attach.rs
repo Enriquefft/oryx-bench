@@ -18,7 +18,7 @@ use clap::Parser;
 
 use crate::config::Project;
 use crate::pull::{self, PullOutcome};
-use crate::schema::kb_toml::KbToml;
+use crate::schema::kb_toml::{AutoPull, KbToml};
 use crate::util::{
     fs as fsx,
     git::{self, WorkingTreeState},
@@ -119,8 +119,13 @@ pub fn run(args: Args, project_override: Option<PathBuf>) -> Result<ExitCode> {
     // the pulled Oryx layout instead of serving stale local artifacts.
     crate::build::invalidate_build_cache(&project);
 
+    let pull_msg = match &outcome {
+        PullOutcome::Pulled { to, .. } => format!("Pulled revision {to}."),
+        PullOutcome::UpToDate => "Already up to date.".into(),
+        _ => format!("{outcome:?}"),
+    };
     println!(
-        "{} Attached to Oryx hash '{}'. Pull result: {outcome:?}",
+        "{} Attached to Oryx hash '{}'. {pull_msg}",
         crate::util::term::OK,
         args.hash
     );
@@ -137,6 +142,10 @@ fn rewrite_kb_toml_for_attach(project: &Project, hash: &str) -> Result<String> {
     let mut cfg: KbToml = project.cfg.clone();
     cfg.layout.hash_id = Some(hash.to_string());
     cfg.layout.local = None;
+    // Restore auto_pull to the Oryx-mode default. Detach sets it to
+    // "never" (no Oryx source to sync with), so attaching back must
+    // re-enable it — the user is opting back into Oryx sync.
+    cfg.sync.auto_pull = AutoPull::default();
     toml::to_string_pretty(&cfg).context("re-serializing kb.toml")
 }
 

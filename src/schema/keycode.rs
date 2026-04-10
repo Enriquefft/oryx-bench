@@ -131,6 +131,12 @@ pub enum Keycode {
     KcLcurly,     // KC_LCBR = S([)
     KcRcurly,     // KC_RCBR = S(])
     KcPlus,       // KC_PLUS = S(=)
+    KcUnderscore, // KC_UNDS = S(-)
+    KcTilde,      // KC_TILD = S(`)
+    KcPipe,       // KC_PIPE = S(\)
+    KcDblQuote,   // KC_DQUO = S(')
+    KcLessThan,   // KC_LABK = S(,)
+    KcGreaterThan, // KC_RABK = S(.)
 
     // ---- Navigation ---------------------------------------------------------
     KcLeft,
@@ -336,6 +342,12 @@ impl Keycode {
             KcLcurly => "KC_LCBR",
             KcRcurly => "KC_RCBR",
             KcPlus => "KC_PLUS",
+            KcUnderscore => "KC_UNDS",
+            KcTilde => "KC_TILD",
+            KcPipe => "KC_PIPE",
+            KcDblQuote => "KC_DQUO",
+            KcLessThan => "KC_LABK",
+            KcGreaterThan => "KC_RABK",
 
             KcLeft => "KC_LEFT",
             KcRight => "KC_RIGHT",
@@ -534,6 +546,12 @@ impl Keycode {
             "LCBR" | "LEFT_CURLY_BRACE" => Some(KcLcurly),
             "RCBR" | "RIGHT_CURLY_BRACE" => Some(KcRcurly),
             "PLUS" => Some(KcPlus),
+            "UNDS" | "UNDERSCORE" => Some(KcUnderscore),
+            "TILD" | "TILDE" => Some(KcTilde),
+            "PIPE" => Some(KcPipe),
+            "DQUO" | "DOUBLE_QUOTE" => Some(KcDblQuote),
+            "LABK" | "LEFT_ANGLE_BRACKET" => Some(KcLessThan),
+            "RABK" | "RIGHT_ANGLE_BRACKET" => Some(KcGreaterThan),
 
             "LEFT" => Some(KcLeft),
             "RIGHT" => Some(KcRight),
@@ -923,6 +941,12 @@ mod tests {
             KcLcurly,
             KcRcurly,
             KcPlus,
+            KcUnderscore,
+            KcTilde,
+            KcPipe,
+            KcDblQuote,
+            KcLessThan,
+            KcGreaterThan,
             KcLeft,
             KcRight,
             KcUp,

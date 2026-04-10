@@ -64,8 +64,11 @@ pub fn working_tree_state(repo_root: &Path, path: &str) -> Result<WorkingTreeSta
         return Ok(WorkingTreeState::NotARepo);
     }
 
+    let code = output
+        .status
+        .code()
+        .map_or("killed by signal".to_string(), |c| c.to_string());
     Err(anyhow!(
-        "git status failed (exit {:?}): {stderr}",
-        output.status.code()
+        "git status failed (exit {code}): {stderr}"
     ))
 }
