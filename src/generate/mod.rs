@@ -71,8 +71,15 @@ pub fn generate_all(
         }
     }
 
-    let keymap_c = keymap::emit_keymap_c(layout, geom, &layer_table, &custom_keycodes, &tap_dances)?;
-    let features_c = features::emit_features_c(features, &layer_table, &custom_keycodes, layout, &tap_dances)?;
+    let keymap_c =
+        keymap::emit_keymap_c(layout, geom, &layer_table, &custom_keycodes, &tap_dances)?;
+    let features_c = features::emit_features_c(
+        features,
+        &layer_table,
+        &custom_keycodes,
+        layout,
+        &tap_dances,
+    )?;
     let features_h = features::emit_features_h(&custom_keycodes, &tap_dances);
     let config_h = config_h::emit_config_h(features)?;
     let rules_mk = rules_mk::emit_rules_mk(features, overlay_dir, !tap_dances.is_empty())?;
@@ -522,10 +529,7 @@ mod tests {
         };
         let err = build_tap_dance_table(&layout).unwrap_err();
         let msg = err.to_string();
-        assert!(
-            msg.contains("tap_hold"),
-            "expected tap_hold error: {msg}"
-        );
+        assert!(msg.contains("tap_hold"), "expected tap_hold error: {msg}");
     }
 
     #[test]
@@ -557,11 +561,13 @@ mod tests {
             "keymap should contain TD(0) for double_tap key"
         );
         assert!(
-            gen.features_c.contains("tap_dance_action_t tap_dance_actions[]"),
+            gen.features_c
+                .contains("tap_dance_action_t tap_dance_actions[]"),
             "features.c should contain tap_dance_actions array"
         );
         assert!(
-            gen.features_c.contains("ACTION_TAP_DANCE_DOUBLE(KC_NO, TO(MAIN))"),
+            gen.features_c
+                .contains("ACTION_TAP_DANCE_DOUBLE(KC_NO, TO(MAIN))"),
             "features.c should contain the tap dance entry, got:\n{}",
             gen.features_c
         );

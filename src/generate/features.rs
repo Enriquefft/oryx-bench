@@ -118,7 +118,11 @@ pub fn emit_features_c(
     out.push('\n');
 
     if !tap_dances.is_empty() {
-        out.push_str(&emit_tap_dance_actions(tap_dances, layers, custom_keycodes)?);
+        out.push_str(&emit_tap_dance_actions(
+            tap_dances,
+            layers,
+            custom_keycodes,
+        )?);
         out.push('\n');
     }
 
@@ -661,7 +665,8 @@ mod tests {
             combos: Vec::new(),
             config: Default::default(),
         };
-        let out = emit_features_c(&features, &layers, &custom, &layout, &TapDanceTable::new()).unwrap();
+        let out =
+            emit_features_c(&features, &layers, &custom, &layout, &TapDanceTable::new()).unwrap();
         assert!(out.contains("process_record_user"));
         assert!(out.contains("process_record_user_overlay"));
     }
@@ -851,8 +856,7 @@ mod tests {
                 layer: LayerRef::Name("Gaming".into()),
             },
         }];
-        let out =
-            emit_tap_dance_actions(&tap_dances, &layers, &CustomKeycodeTable::new()).unwrap();
+        let out = emit_tap_dance_actions(&tap_dances, &layers, &CustomKeycodeTable::new()).unwrap();
         assert!(out.contains("tap_dance_action_t tap_dance_actions[]"));
         assert!(out.contains("ACTION_TAP_DANCE_DOUBLE(KC_NO, TO(GAMING))"));
     }

@@ -155,7 +155,10 @@ geometry = "voyager"
         match Project::discover(Some(&inner)) {
             Err(e) => {
                 assert!(
-                    matches!(e.downcast::<ProjectError>().unwrap(), ProjectError::NotFound(_)),
+                    matches!(
+                        e.downcast::<ProjectError>().unwrap(),
+                        ProjectError::NotFound(_)
+                    ),
                     "expected NotFound"
                 );
             }

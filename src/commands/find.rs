@@ -40,10 +40,18 @@ pub fn run(args: Args, project_override: Option<PathBuf>) -> Result<ExitCode> {
         let geom = crate::schema::geometry::get(project.cfg.layout.geometry.as_str());
         for (i, key) in layer.keys.iter().enumerate() {
             // Skip empty keys (KC_NO with no hold/double_tap/tap_hold).
-            if key.tap.is_none() && key.hold.is_none() && key.double_tap.is_none() && key.tap_hold.is_none() {
+            if key.tap.is_none()
+                && key.hold.is_none()
+                && key.double_tap.is_none()
+                && key.tap_hold.is_none()
+            {
                 continue;
             }
-            if matches!(&key.tap, Some(CanonicalAction::None)) && key.hold.is_none() && key.double_tap.is_none() && key.tap_hold.is_none() {
+            if matches!(&key.tap, Some(CanonicalAction::None))
+                && key.hold.is_none()
+                && key.double_tap.is_none()
+                && key.tap_hold.is_none()
+            {
                 continue;
             }
             let pos = geom

@@ -171,7 +171,12 @@ pub fn full_layout_query(
         .ok_or_else(|| PullError::GraphQl("no data field in response".into()))?;
     let layout = match data.get("layout") {
         Some(v) if !v.is_null() => v.clone(),
-        _ => return Err(PullError::LayoutNotFound { hash_id: hash_id.to_owned() }.into()),
+        _ => {
+            return Err(PullError::LayoutNotFound {
+                hash_id: hash_id.to_owned(),
+            }
+            .into())
+        }
     };
     Ok(layout)
 }

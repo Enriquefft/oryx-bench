@@ -52,7 +52,13 @@ pub fn emit_keymap_c(
     out.push_str(&emit_layers_enum(layout, layers));
     out.push('\n');
 
-    out.push_str(&emit_keymaps_array(layout, geom, layers, custom_keycodes, tap_dances)?);
+    out.push_str(&emit_keymaps_array(
+        layout,
+        geom,
+        layers,
+        custom_keycodes,
+        tap_dances,
+    )?);
 
     Ok(out)
 }
@@ -113,10 +119,9 @@ fn emit_keymaps_array(
             let cell = match layer.keys.get(canonical_idx) {
                 Some(k) => {
                     // If this key has a tap-dance entry, emit TD(n).
-                    if let Some(td) = tap_dances
-                        .iter()
-                        .find(|td| td.layer_position == layer.position && td.key_index == canonical_idx)
-                    {
+                    if let Some(td) = tap_dances.iter().find(|td| {
+                        td.layer_position == layer.position && td.key_index == canonical_idx
+                    }) {
                         format!("TD({})", td.td_index)
                     } else {
                         emit_key(k, layers, custom_keycodes)?

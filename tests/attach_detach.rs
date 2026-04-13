@@ -328,8 +328,14 @@ async fn detach_on_local_mode_project_errors_with_nothing_to_detach() {
     // Files must be byte-identical — detach must not touch anything.
     let kb_after = fs::read_to_string(td.path().join("kb.toml")).unwrap();
     let layout_after = fs::read_to_string(td.path().join("layout.toml")).unwrap();
-    assert_eq!(kb_before, kb_after, "kb.toml must be untouched after failed detach");
-    assert_eq!(layout_before, layout_after, "layout.toml must be untouched after failed detach");
+    assert_eq!(
+        kb_before, kb_after,
+        "kb.toml must be untouched after failed detach"
+    );
+    assert_eq!(
+        layout_before, layout_after,
+        "layout.toml must be untouched after failed detach"
+    );
 
     // Still no pulled/ directory.
     assert!(

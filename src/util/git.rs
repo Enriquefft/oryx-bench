@@ -68,7 +68,5 @@ pub fn working_tree_state(repo_root: &Path, path: &str) -> Result<WorkingTreeSta
         .status
         .code()
         .map_or("killed by signal".to_string(), |c| c.to_string());
-    Err(anyhow!(
-        "git status failed (exit {code}): {stderr}"
-    ))
+    Err(anyhow!("git status failed (exit {code}): {stderr}"))
 }
