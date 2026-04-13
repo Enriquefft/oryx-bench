@@ -65,6 +65,16 @@ pub fn emit_rules_mk(
         out.push_str("TAP_DANCE_ENABLE = yes\n\n");
     }
 
+    // Disable the DFU suffix. The Voyager's upstream rules.mk sets
+    // DFU_SUFFIX_ARGS which stamps vendor/product IDs into the .bin.
+    // oryx-bench flashes via wally-cli or keymapp, neither of which
+    // needs the suffix. wally-cli v2.0.x has a byte-order bug that
+    // rejects the suffix produced by dfu-util >= 0.11. Rather than
+    // working around the bug, we remove the root cause: the suffix
+    // has no purpose in this pipeline.
+    out.push_str("# Disable DFU suffix — not needed for wally-cli/keymapp flashing\n");
+    out.push_str("DFU_SUFFIX_ARGS =\n\n");
+
     // Always-on additions: the generated _features.c.
     out.push_str("SRC += _features.c\n");
 
