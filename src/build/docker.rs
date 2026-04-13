@@ -86,8 +86,7 @@ fn ensure_image() -> Result<()> {
     let tmp = tempfile::tempdir().context("creating temp dir for Docker build context")?;
     std::fs::write(tmp.path().join("Dockerfile"), DOCKERFILE)
         .context("writing embedded Dockerfile")?;
-    std::fs::write(tmp.path().join("pin.txt"), FIRMWARE_PIN)
-        .context("writing embedded pin.txt")?;
+    std::fs::write(tmp.path().join("pin.txt"), FIRMWARE_PIN).context("writing embedded pin.txt")?;
 
     let status = Command::new("docker")
         .args(["build", "-t", IMAGE_TAG, "."])
@@ -204,9 +203,7 @@ pub fn build(project: &Project, generated: &Generated, dry_run: bool) -> Result<
             .status
             .code()
             .map_or("killed by signal".to_string(), |c| c.to_string());
-        bail!(
-            "docker build failed (exit {code}):\nstderr:\n{stderr}\nstdout:\n{stdout}"
-        );
+        bail!("docker build failed (exit {code}):\nstderr:\n{stderr}\nstdout:\n{stdout}");
     }
 
     // Locate the produced .bin. `qmk compile` writes to the project root;

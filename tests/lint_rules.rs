@@ -116,8 +116,15 @@ fn lt_on_high_freq_error_in_local_mode() {
         ..Default::default()
     };
     let issues = lint::run_all(&layout, &project).unwrap();
-    let issue = issues.iter().find(|i| i.rule_id == "lt-on-high-freq").expect("rule should fire");
-    assert_eq!(issue.severity, Severity::Error, "local mode uses default severity");
+    let issue = issues
+        .iter()
+        .find(|i| i.rule_id == "lt-on-high-freq")
+        .expect("rule should fire");
+    assert_eq!(
+        issue.severity,
+        Severity::Error,
+        "local mode uses default severity"
+    );
 }
 
 #[test]
@@ -132,8 +139,15 @@ fn lt_on_high_freq_downgraded_to_warning_in_oryx_mode() {
         ..Default::default()
     };
     let issues = lint::run_all(&layout, &project).unwrap();
-    let issue = issues.iter().find(|i| i.rule_id == "lt-on-high-freq").expect("rule should fire");
-    assert_eq!(issue.severity, Severity::Warning, "Oryx mode downgrades to warning pre-detach");
+    let issue = issues
+        .iter()
+        .find(|i| i.rule_id == "lt-on-high-freq")
+        .expect("rule should fire");
+    assert_eq!(
+        issue.severity,
+        Severity::Warning,
+        "Oryx mode downgrades to warning pre-detach"
+    );
 }
 
 #[test]
@@ -162,7 +176,11 @@ ms = 600
         .iter()
         .find(|i| i.rule_id == "lt-on-high-freq")
         .expect("rule should still emit an issue");
-    assert_eq!(issue.severity, Severity::Info, "achordion timeout downgrades to info");
+    assert_eq!(
+        issue.severity,
+        Severity::Info,
+        "achordion timeout downgrades to info"
+    );
     assert!(
         issue.message.contains("achordion configured"),
         "message should mention achordion: {}",
@@ -394,8 +412,15 @@ fn layer_name_collision_fires_warning_in_local_mode() {
     layout.layers[0].name = "Sym+Num".into();
     layout.layers[1].name = "Sym Num".into();
     let issues = lint::run_all(&layout, &project).unwrap();
-    let issue = issues.iter().find(|i| i.rule_id == "layer-name-collision").expect("rule should fire");
-    assert_eq!(issue.severity, Severity::Warning, "local mode uses default severity");
+    let issue = issues
+        .iter()
+        .find(|i| i.rule_id == "layer-name-collision")
+        .expect("rule should fire");
+    assert_eq!(
+        issue.severity,
+        Severity::Warning,
+        "local mode uses default severity"
+    );
 }
 
 #[test]
@@ -405,8 +430,15 @@ fn layer_name_collision_downgraded_to_info_in_oryx_mode() {
     layout.layers[0].name = "Layer".into();
     layout.layers[1].name = "Layer".into();
     let issues = lint::run_all(&layout, &project).unwrap();
-    let issue = issues.iter().find(|i| i.rule_id == "layer-name-collision").expect("rule should fire");
-    assert_eq!(issue.severity, Severity::Info, "Oryx defaults cause collisions; downgraded to info pre-detach");
+    let issue = issues
+        .iter()
+        .find(|i| i.rule_id == "layer-name-collision")
+        .expect("rule should fire");
+    assert_eq!(
+        issue.severity,
+        Severity::Info,
+        "Oryx defaults cause collisions; downgraded to info pre-detach"
+    );
 }
 
 #[test]

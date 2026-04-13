@@ -3,9 +3,7 @@
 //! Not built on `tabled` — the Voyager's shape doesn't fit `tabled`'s
 //! rectangular model. ~100 lines of straightforward formatting code.
 
-use crate::schema::canonical::{
-    CanonicalAction, CanonicalKey, CanonicalLayer, LayerRef,
-};
+use crate::schema::canonical::{CanonicalAction, CanonicalKey, CanonicalLayer, LayerRef};
 use crate::schema::geometry::{Geometry, GridLayout, Hand, ThumbCluster};
 use crate::schema::keycode::{Keycode, Modifier};
 
@@ -122,7 +120,11 @@ fn compact_key(key: &CanonicalKey, layers: &[CanonicalLayer]) -> String {
             format!("{m}:{t}")
         }
         (Some(t), Some(h)) => {
-            format!("{}/{}", compact_action(t, layers), compact_action(h, layers))
+            format!(
+                "{}/{}",
+                compact_action(t, layers),
+                compact_action(h, layers)
+            )
         }
         (Some(t), None) => compact_action(t, layers),
         (None, Some(h)) => format!("/{}", compact_action(h, layers)),
@@ -450,7 +452,12 @@ mod tests {
             position: 0,
             keys: vec![CanonicalKey::default(); 52],
         };
-        let out = render_layer(&Voyager, &layer, &[layer.clone()], &RenderOptions::default());
+        let out = render_layer(
+            &Voyager,
+            &layer,
+            std::slice::from_ref(&layer),
+            &RenderOptions::default(),
+        );
         // Empty keys render as blank (KC_NO compact form).
         assert!(out.lines().count() > 4);
     }
@@ -464,10 +471,7 @@ mod tests {
     #[test]
     fn truncate_with_ellipsis_appends_marker() {
         // 7 chars kept — 6 first chars + ellipsis.
-        assert_eq!(
-            truncate_with_ellipsis("LT(Sym+Num, KC_BSPC)", 7),
-            "LT(Sym…"
-        );
+        assert_eq!(truncate_with_ellipsis("LT(Sym+Num, KC_BSPC)", 7), "LT(Sym…");
     }
 
     #[test]
@@ -491,7 +495,7 @@ mod tests {
         let out = render_layer(
             &Voyager,
             &layer,
-            &[layer.clone()],
+            std::slice::from_ref(&layer),
             &RenderOptions {
                 show_position_names: true,
             },

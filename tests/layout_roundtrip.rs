@@ -22,11 +22,10 @@ fn load_oryx_canonical() -> CanonicalLayout {
 /// `KC_NO`. For the round-trip contract, both are equivalent: the
 /// position is inactive.
 fn is_inactive(action: &Option<CanonicalAction>) -> bool {
-    match action {
-        None => true,
-        Some(CanonicalAction::None) | Some(CanonicalAction::Transparent) => true,
-        _ => false,
-    }
+    matches!(
+        action,
+        None | Some(CanonicalAction::None) | Some(CanonicalAction::Transparent)
+    )
 }
 
 #[test]
@@ -38,8 +37,8 @@ fn oryx_to_layout_toml_to_local_produces_equivalent_canonical() {
     let layout_toml = layout::render_layout_toml(&oryx_canonical).unwrap();
 
     // Step 3: Parse the layout.toml back into a LayoutFile.
-    let parsed: layout::LayoutFile = toml::from_str(&layout_toml)
-        .expect("rendered layout.toml must parse back cleanly");
+    let parsed: layout::LayoutFile =
+        toml::from_str(&layout_toml).expect("rendered layout.toml must parse back cleanly");
 
     // Step 4: Convert to canonical via the local path.
     let local_canonical = CanonicalLayout::from_local(&parsed).unwrap();
@@ -73,10 +72,7 @@ fn oryx_to_layout_toml_to_local_produces_equivalent_canonical() {
         .iter()
         .zip(local_canonical.layers.iter())
     {
-        assert_eq!(
-            o_layer.name, l_layer.name,
-            "layer name mismatch"
-        );
+        assert_eq!(o_layer.name, l_layer.name, "layer name mismatch");
         assert_eq!(
             o_layer.position, l_layer.position,
             "layer position mismatch (layer {})",
@@ -92,23 +88,16 @@ fn oryx_to_layout_toml_to_local_produces_equivalent_canonical() {
             let o_active = !is_inactive(&o_key.tap) || !is_inactive(&o_key.hold);
             let l_active = !is_inactive(&l_key.tap) || !is_inactive(&l_key.hold);
             assert_eq!(
-                o_active, l_active,
+                o_active,
+                l_active,
                 "active/inactive mismatch in layer '{}' at index {} \
                  (oryx tap={} hold={}, local tap={} hold={})",
                 o_layer.name,
                 i,
                 o_key.display(),
-                o_key
-                    .hold
-                    .as_ref()
-                    .map(|a| a.display())
-                    .unwrap_or_default(),
+                o_key.hold.as_ref().map(|a| a.display()).unwrap_or_default(),
                 l_key.display(),
-                l_key
-                    .hold
-                    .as_ref()
-                    .map(|a| a.display())
-                    .unwrap_or_default(),
+                l_key.hold.as_ref().map(|a| a.display()).unwrap_or_default(),
             );
             if o_active {
                 assert_eq!(
