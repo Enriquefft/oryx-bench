@@ -206,9 +206,21 @@ fn mods_to_qmk(mods: &[String]) -> Result<String> {
                 "key_override mods entry '{raw}' is not a recognized QMK modifier"
             ));
         }
-        parts.push(format!("MOD_{bare}"));
+        let canonical = normalize_mod_token(bare);
+        parts.push(format!("MOD_{canonical}"));
     }
     Ok(parts.join(" | "))
+}
+
+/// Map user-friendly modifier aliases to QMK canonical short names.
+fn normalize_mod_token(t: &str) -> &str {
+    match t {
+        "LSHIFT" => "LSFT",
+        "RSHIFT" => "RSFT",
+        "LCTRL" => "LCTL",
+        "RCTRL" => "RCTL",
+        other => other,
+    }
 }
 
 fn is_valid_modifier_token(t: &str) -> bool {
@@ -250,7 +262,7 @@ fn normalize_keycode_token(s: &str) -> String {
             }
         }
     }
-    if trimmed.starts_with("KC_") {
+    if trimmed.starts_with("KC_") || trimmed.starts_with("QK_") {
         return trimmed.to_string();
     }
     // Bare name. Reject if it's not actually a known QMK keycode after
@@ -602,7 +614,7 @@ mod tests {
             ..Default::default()
         };
         let out = emit_key_overrides(&features).unwrap();
-        assert!(out.contains("MOD_LSHIFT"));
+        assert!(out.contains("MOD_LSFT"));
         assert!(out.contains("KC_BSPC"));
         assert!(out.contains("KC_DELETE"));
         assert!(out.contains("ko_make_basic"));
