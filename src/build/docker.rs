@@ -181,8 +181,16 @@ pub fn build(project: &Project, generated: &Generated, dry_run: bool) -> Result<
         cmd.arg("--user")
             .arg(format!("{}:{}", meta.uid(), meta.gid()));
     }
+    // Bind-mount the project root at /work (for QMK output) and the
+    // staged keymap directory into the firmware tree where QMK expects
+    // it: /firmware/keyboards/zsa/voyager/keymaps/oryx-bench/.
     cmd.arg("-v")
         .arg(format!("{}:/work", project.root.display()))
+        .arg("-v")
+        .arg(format!(
+            "{}:/firmware/keyboards/zsa/voyager/keymaps/oryx-bench:ro",
+            keymap_dir.display()
+        ))
         .arg("-w")
         .arg("/work")
         .arg(IMAGE_TAG)
