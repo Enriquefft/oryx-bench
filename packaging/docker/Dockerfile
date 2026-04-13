@@ -19,7 +19,7 @@
 
 FROM ubuntu:24.04
 
-LABEL maintainer="Enrique Flores <enrique@zsa.io>"
+LABEL maintainer="Enrique Flores <enriquefft@404tf.com>"
 LABEL description="Deterministic build environment for oryx-bench + ZSA keyboard layouts"
 
 # Prevent interactive prompts during apt-get
