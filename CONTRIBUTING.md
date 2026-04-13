@@ -159,12 +159,13 @@ cargo test --test codegen_roundtrip
 
 ## Releasing
 
-1. Update `CHANGELOG.md` (move `[Unreleased]` items into a new version section).
+1. Update `CHANGELOG.md` (rename `[Unreleased]` to `[0.x.y] - YYYY-MM-DD`, add footer link).
 2. Bump version in `Cargo.toml`.
 3. Tag: `git tag v0.x.y && git push --tags`.
-4. CI (`release.yml`) builds binaries for all platforms via `cargo dist`,
-   creates a GitHub release, publishes to crates.io.
-5. Update Homebrew tap, AUR PKGBUILD if needed.
+4. CI (`release.yml`) automatically:
+   - Builds static Linux binaries (x86_64 + aarch64 musl) and attaches them to the GitHub release.
+   - Deploys an updated `PKGBUILD` to the AUR (`oryx-bench`).
+   - Publishes to crates.io (requires `CRATES_IO_TOKEN` secret in the repo).
 
 ## Code style
 
