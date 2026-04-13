@@ -8,7 +8,7 @@
 //! #include QMK_KEYBOARD_H
 //! #include "_features.h"   // declarations from generate::features
 //!
-//! enum layers { MAIN, SYM_NUM, BRD_SYS, GAMING };
+//! // enum layers is in _features.h (shared header)
 //!
 //! const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 //!   [MAIN] = LAYOUT_voyager(
@@ -33,7 +33,7 @@ use super::{CustomKeycodeTable, LayerTable, TapDanceTable};
 /// Top-level entry point — produces the full keymap.c source string.
 ///
 /// `keymap.c` only owns the per-layer `LAYOUT_<board>(...)` arrays and
-/// the `enum layers` definition. The `enum custom_keycodes` and the
+/// combo definitions. The `enum layers`, `enum custom_keycodes`, and the
 /// `process_record_user` dispatch live in `_features.h` / `_features.c`
 /// so both translation units see the same symbols.
 pub fn emit_keymap_c(
@@ -49,8 +49,8 @@ pub fn emit_keymap_c(
     out.push_str("#include QMK_KEYBOARD_H\n");
     out.push_str("#include \"_features.h\"\n\n");
 
-    out.push_str(&emit_layers_enum(layout, layers));
-    out.push('\n');
+    // Layer enum is emitted in _features.h (shared header) so both
+    // keymap.c and _features.c see it. No enum here — just include.
 
     out.push_str(&emit_keymaps_array(
         layout,
@@ -63,20 +63,7 @@ pub fn emit_keymap_c(
     Ok(out)
 }
 
-fn emit_layers_enum(layout: &CanonicalLayout, layers: &LayerTable) -> String {
-    let mut out = String::from("enum layers {\n");
-    let mut sorted: Vec<&CanonicalLayer> = layout.layers.iter().collect();
-    sorted.sort_by_key(|l| l.position);
-    for layer in sorted {
-        let ident = layers
-            .get(&layer.name)
-            .map(|e| e.ident.clone())
-            .unwrap_or_else(|| layer.name.clone());
-        let _ = writeln!(out, "    {ident},");
-    }
-    out.push_str("};\n");
-    out
-}
+// Layer enum moved to _features.h via emit_features_h().
 
 fn emit_keymaps_array(
     layout: &CanonicalLayout,
@@ -131,8 +118,15 @@ fn emit_keymaps_array(
             };
             cells.push(cell);
         }
-        for chunk in cells.chunks(6) {
-            let _ = writeln!(out, "        {},", chunk.join(", "));
+        let chunks: Vec<&[String]> = cells.chunks(6).collect();
+        for (i, chunk) in chunks.iter().enumerate() {
+            if i + 1 < chunks.len() {
+                let _ = writeln!(out, "        {},", chunk.join(", "));
+            } else {
+                // Last chunk: no trailing comma — it creates an extra
+                // empty argument in C preprocessor function-like macros.
+                let _ = writeln!(out, "        {}", chunk.join(", "));
+            }
         }
         out.push_str("    ),\n");
     }
@@ -466,7 +460,8 @@ mod tests {
         let custom = CustomKeycodeTable::new();
         let out = emit_keymap_c(&layout, geom, &layers, &custom, &TapDanceTable::new()).unwrap();
         assert!(out.contains("LAYOUT_voyager"));
-        assert!(out.contains("enum layers"));
+        // Layer enum is now emitted in _features.h, not keymap.c
+        assert!(!out.contains("enum layers"));
         assert!(out.contains("[MAIN] = LAYOUT_voyager"));
     }
 }
