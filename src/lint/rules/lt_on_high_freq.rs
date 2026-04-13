@@ -32,12 +32,30 @@ impl LintRule for Rule {
     }
 
     fn check(&self, ctx: &LintContext) -> Vec<Issue> {
+        let achordion = ctx.features.achordion.as_ref().filter(|a| a.enabled);
         let mut out = Vec::new();
         for layer in &ctx.layout.layers {
             for (idx, key) in layer.keys.iter().enumerate() {
-                if let Some(CanonicalAction::Lt { tap, .. }) = &key.tap {
+                if let Some(lt @ CanonicalAction::Lt { tap, .. }) = &key.tap {
                     if let Some(kc) = tap.tap_keycode() {
                         if kc.is_high_frequency() {
+                            if let Some(a) = achordion {
+                                let binding = lt.display();
+                                if let Some(t) = a.timeout.iter().find(|t| t.binding == binding) {
+                                    out.push(Issue {
+                                        rule_id: self.id().to_string(),
+                                        severity: Severity::Info,
+                                        message: format!(
+                                            "LT on high-frequency key {} — achordion configured (timeout {}ms)",
+                                            kc.canonical_name(),
+                                            t.ms,
+                                        ),
+                                        layer: Some(layer.name.clone()),
+                                        position_index: Some(idx),
+                                    });
+                                    continue;
+                                }
+                            }
                             out.push(Issue {
                                 rule_id: self.id().to_string(),
                                 severity: self.severity(),

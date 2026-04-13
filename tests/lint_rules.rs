@@ -137,6 +137,101 @@ fn lt_on_high_freq_downgraded_to_warning_in_oryx_mode() {
 }
 
 #[test]
+fn lt_on_high_freq_suppressed_with_achordion_timeout() {
+    let (_td, project) = test_local_project_with_features(
+        r#"
+[achordion]
+enabled = true
+chord_strategy = "opposite_hands"
+
+[[achordion.timeout]]
+binding = "LT(SymNum, KC_BSPC)"
+ms = 600
+"#,
+    );
+    let mut layout = basic_layout();
+    layout.layers[0].keys[51] = CanonicalKey {
+        tap: Some(CanonicalAction::Lt {
+            layer: LayerRef::Name("SymNum".into()),
+            tap: Box::new(CanonicalAction::Keycode(Keycode::KcBspc)),
+        }),
+        ..Default::default()
+    };
+    let issues = lint::run_all(&layout, &project).unwrap();
+    let issue = issues
+        .iter()
+        .find(|i| i.rule_id == "lt-on-high-freq")
+        .expect("rule should still emit an issue");
+    assert_eq!(issue.severity, Severity::Info, "achordion timeout downgrades to info");
+    assert!(
+        issue.message.contains("achordion configured"),
+        "message should mention achordion: {}",
+        issue.message
+    );
+}
+
+#[test]
+fn lt_on_high_freq_still_fires_with_achordion_but_no_timeout() {
+    let (_td, project) = test_local_project_with_features(
+        r#"
+[achordion]
+enabled = true
+chord_strategy = "opposite_hands"
+"#,
+    );
+    let mut layout = basic_layout();
+    layout.layers[0].keys[51] = CanonicalKey {
+        tap: Some(CanonicalAction::Lt {
+            layer: LayerRef::Name("SymNum".into()),
+            tap: Box::new(CanonicalAction::Keycode(Keycode::KcBspc)),
+        }),
+        ..Default::default()
+    };
+    let issues = lint::run_all(&layout, &project).unwrap();
+    let issue = issues
+        .iter()
+        .find(|i| i.rule_id == "lt-on-high-freq")
+        .expect("rule should fire");
+    assert_eq!(
+        issue.severity,
+        Severity::Error,
+        "achordion enabled without matching timeout still errors"
+    );
+}
+
+#[test]
+fn lt_on_high_freq_not_suppressed_when_achordion_disabled() {
+    let (_td, project) = test_local_project_with_features(
+        r#"
+[achordion]
+enabled = false
+
+[[achordion.timeout]]
+binding = "LT(SymNum, KC_BSPC)"
+ms = 600
+"#,
+    );
+    let mut layout = basic_layout();
+    layout.layers[0].keys[51] = CanonicalKey {
+        tap: Some(CanonicalAction::Lt {
+            layer: LayerRef::Name("SymNum".into()),
+            tap: Box::new(CanonicalAction::Keycode(Keycode::KcBspc)),
+        }),
+        ..Default::default()
+    };
+    let issues = lint::run_all(&layout, &project).unwrap();
+    let issue = issues
+        .iter()
+        .find(|i| i.rule_id == "lt-on-high-freq")
+        .expect("rule should fire");
+    assert_eq!(
+        issue.severity,
+        Severity::Error,
+        "achordion disabled means timeout entries are ignored"
+    );
+}
+
+#[test]
 fn unreachable_layer_fires_on_orphan() {
     let (_td, project) = test_project_with_features("");
     let mut layout = basic_layout();
