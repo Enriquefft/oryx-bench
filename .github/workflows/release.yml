@@ -116,7 +116,7 @@ jobs:
           fi
           cargo publish
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   # ── 6. Deploy to AUR ─────────────────────────────────────────────────────────
   deploy-aur:
