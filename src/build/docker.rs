@@ -216,7 +216,21 @@ pub fn build(project: &Project, generated: &Generated, dry_run: bool) -> Result<
         .arg("-w")
         .arg("/work")
         .arg(IMAGE_TAG)
-        .args(["qmk", "compile", "-kb", "zsa/voyager", "-km", "oryx-bench"]);
+        .args([
+            "bash", "-c",
+            // QMK's Makefile copies the final .bin to /firmware/ (Make's
+            // CWD), which is root-owned and fails under --user. The .bin
+            // is already in the writable tmpfs at .build/. We let Make
+            // fail on the cp, then check if the .bin was actually produced
+            // and copy it to /work/ (the bind-mounted project root).
+            "cd /firmware && \
+             qmk compile -kb zsa/voyager -km oryx-bench; \
+             status=$?; \
+             if [ -f .build/zsa_voyager_oryx-bench.bin ]; then \
+               cp .build/zsa_voyager_oryx-bench.bin /work/zsa_voyager_oryx-bench.bin && exit 0; \
+             fi; \
+             exit $status",
+        ]);
 
     let output = cmd.output().context("invoking docker")?;
     if !output.status.success() {
