@@ -145,9 +145,8 @@ pub fn build(project: &Project, generated: &Generated, dry_run: bool) -> Result<
             if name_str.ends_with(".c") || name_str.ends_with(".h") {
                 let src = entry.path();
                 let dst = keymap_dir.join(&name);
-                std::fs::copy(&src, &dst).with_context(|| {
-                    format!("copying {} to keymap dir", src.display())
-                })?;
+                std::fs::copy(&src, &dst)
+                    .with_context(|| format!("copying {} to keymap dir", src.display()))?;
             }
         }
     }
