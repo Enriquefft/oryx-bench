@@ -37,10 +37,73 @@ pub const IMAGE_TAG: &str = concat!(
     env!("CARGO_PKG_VERSION")
 );
 
+/// Dockerfile embedded at compile time so the binary can build the
+/// image locally when the pre-built GHCR image isn't available (e.g.
+/// development builds, unreleased versions, air-gapped machines).
+const DOCKERFILE: &str = include_str!("../../packaging/docker/Dockerfile");
+const FIRMWARE_PIN: &str = include_str!("../../packaging/docker/pin.txt");
+
 /// `qmk compile` writes its output to the project root with this name.
 /// We move it under `.oryx-bench/build/firmware.bin` after staging and
 /// delete the project-root copy so the user's git tree stays clean.
 const QMK_OUTPUT_NAMES: &[&str] = &["zsa_voyager_oryx-bench.bin", "oryx-bench.bin"];
+
+/// Ensure the Docker image is available locally.
+///
+/// Resolution order:
+/// 1. `docker image inspect` — already present locally, nothing to do.
+/// 2. `docker pull` — fetch the pre-built image from GHCR.
+/// 3. `docker build` — build from the Dockerfile/pin.txt embedded in
+///    this binary. This is the fallback for development builds,
+///    unreleased versions, or environments without GHCR access.
+fn ensure_image() -> Result<()> {
+    // 1. Already present?
+    let inspect = Command::new("docker")
+        .args(["image", "inspect", IMAGE_TAG])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .context("running `docker image inspect`")?;
+    if inspect.success() {
+        return Ok(());
+    }
+
+    // 2. Try pulling from GHCR.
+    eprintln!("Image {IMAGE_TAG} not found locally, pulling…");
+    let pull = Command::new("docker")
+        .args(["pull", IMAGE_TAG])
+        .status()
+        .context("running `docker pull`")?;
+    if pull.success() {
+        return Ok(());
+    }
+
+    // 3. Build locally from the embedded Dockerfile.
+    eprintln!(
+        "Pull failed — building image locally from embedded Dockerfile \
+         (this may take several minutes on first run)…"
+    );
+    let tmp = tempfile::tempdir().context("creating temp dir for Docker build context")?;
+    std::fs::write(tmp.path().join("Dockerfile"), DOCKERFILE)
+        .context("writing embedded Dockerfile")?;
+    std::fs::write(tmp.path().join("pin.txt"), FIRMWARE_PIN)
+        .context("writing embedded pin.txt")?;
+
+    let status = Command::new("docker")
+        .args(["build", "-t", IMAGE_TAG, "."])
+        .current_dir(tmp.path())
+        .status()
+        .context("running `docker build`")?;
+    if !status.success() {
+        bail!(
+            "failed to build Docker image locally (exit {}).\n\
+             Try building manually:\n  \
+             docker build -t {IMAGE_TAG} packaging/docker/",
+            status.code().map_or("signal".into(), |c| c.to_string()),
+        );
+    }
+    Ok(())
+}
 
 pub fn build(project: &Project, generated: &Generated, dry_run: bool) -> Result<BuildOutput> {
     let dir = build_dir(project);
@@ -97,12 +160,14 @@ pub fn build(project: &Project, generated: &Generated, dry_run: bool) -> Result<
         });
     }
 
-    // Real docker invocation. Surface a friendly error if docker is missing.
+    // Surface a friendly error if docker is missing.
     if which::which("docker").is_err() {
         bail!(
             "`docker` not found on PATH. The v0.1 build backend requires docker — install it from https://docs.docker.com/get-docker/ or run `oryx-bench setup` to see what's missing."
         );
     }
+
+    ensure_image()?;
 
     let mut cmd = Command::new("docker");
     cmd.arg("run").arg("--rm");
