@@ -87,7 +87,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Mark release as published
-        run: gh release edit "${{ github.ref_name }}" --draft=false
+        run: gh release edit "${{ github.ref_name }}" --draft=false --repo "${{ github.repository }}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -95,8 +95,8 @@ jobs:
   publish-crates:
     name: Publish to crates.io
     needs: build
-    # Skip pre-release tags (v0.1.0-rc.1 etc.)
-    if: ${{ !contains(github.ref_name, '-') }}
+    # Skip pre-release tags and runs without the token configured
+    if: ${{ !contains(github.ref_name, '-') && secrets.CRATES_IO_TOKEN != '' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -123,7 +123,7 @@ jobs:
           sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packaging/aur/PKGBUILD
           sed -i "s/^pkgrel=.*/pkgrel=1/" packaging/aur/PKGBUILD
 
-      - uses: KSXGitHub/github-actions-deploy-aur@v3.1.1
+      - uses: KSXGitHub/github-actions-deploy-aur@v3
         with:
           pkgname: oryx-bench-bin
           pkgbuild: packaging/aur/PKGBUILD
