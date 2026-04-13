@@ -101,7 +101,10 @@ the QMK build toolchain is pinned in a Docker image at
 `arm-none-eabi-gcc`, `zig`, and the pinned ZSA fork.
 
 ```bash
-# Cargo (any platform)
+# Linux / macOS (x86_64 and arm64) — recommended
+curl -fsSL https://raw.githubusercontent.com/enriquefft/oryx-bench/main/scripts/install.sh | sh
+
+# Cargo (any platform with Rust installed)
 cargo install --locked oryx-bench
 
 # Nix flake (Linux/macOS)

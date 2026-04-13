@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# install.sh — one-line installer for oryx-bench (Linux only)
+# install.sh — one-line installer for oryx-bench (Linux + macOS)
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/enriquefft/oryx-bench/main/scripts/install.sh | sh
@@ -14,28 +14,30 @@ REPO="enriquefft/oryx-bench"
 BIN="oryx-bench"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 
+# ── Detect OS ─────────────────────────────────────────────────────────────────
+OS="$(uname -s)"
+case "$OS" in
+  Linux)  OS_TARGET="unknown-linux-musl" ;;
+  Darwin) OS_TARGET="apple-darwin" ;;
+  *)
+    echo "error: unsupported OS: $OS" >&2
+    echo "       Supported: Linux, macOS" >&2
+    exit 1
+    ;;
+esac
+
 # ── Detect architecture ───────────────────────────────────────────────────────
 case "$(uname -m)" in
   x86_64)          ARCH="x86_64" ;;
   aarch64 | arm64) ARCH="aarch64" ;;
   *)
     echo "error: unsupported architecture: $(uname -m)" >&2
-    echo "       Supported: x86_64, aarch64" >&2
+    echo "       Supported: x86_64, aarch64/arm64" >&2
     exit 1
     ;;
 esac
 
-# ── Detect OS ─────────────────────────────────────────────────────────────────
-case "$(uname -s)" in
-  Linux) ;;
-  *)
-    echo "error: unsupported OS: $(uname -s)" >&2
-    echo "       Only Linux is supported." >&2
-    exit 1
-    ;;
-esac
-
-TARGET="${ARCH}-unknown-linux-musl"
+TARGET="${ARCH}-${OS_TARGET}"
 
 # ── Resolve version ───────────────────────────────────────────────────────────
 if [ -z "${VERSION:-}" ]; then
@@ -50,7 +52,6 @@ if [ -z "${VERSION:-}" ]; then
   fi
 fi
 
-# Normalise: strip leading 'v' for tarball name, keep with 'v' for URL path
 TAG="${VERSION#v}"
 TAG_WITH_V="v${TAG}"
 
