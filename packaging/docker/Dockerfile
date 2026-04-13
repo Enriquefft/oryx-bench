@@ -76,25 +76,27 @@ RUN set -e && \
     git checkout "${REF}" && \
     echo "Pinned to: $(git rev-parse HEAD)"
 
-# Install QMK Python dependencies
-# Use --break-system-packages because we're in a container environment
-# Don't upgrade system pip/setuptools; QMK's requirements will work with Debian versions
+# Install QMK CLI and firmware Python dependencies.
+# `qmk` (the CLI) is a separate package from the firmware repo's
+# requirements.txt (which only lists library deps like milc, hjson, etc.).
+# Use --break-system-packages because we're in a container environment.
 RUN set -e && \
     cd /firmware && \
-    python3 -m pip install --no-cache-dir --break-system-packages -r requirements.txt && \
-    echo "✓ QMK dependencies installed"
+    python3 -m pip install --no-cache-dir --break-system-packages \
+        qmk -r requirements.txt && \
+    echo "✓ QMK CLI + dependencies installed"
 
-# Set QMK home and enable QMK CLI
+# Set QMK home so the CLI finds the firmware tree.
 ENV QMK_HOME=/firmware
-ENV PATH="/firmware/bin:/usr/local/bin:${PATH}"
+ENV PATH="/usr/local/bin:${PATH}"
 
-# Verify all tools are present and functional
+# Verify all tools are present and callable.
 RUN set -e && \
     echo "Build environment ready:" && \
+    echo "  QMK CLI: $(qmk --version)" && \
     echo "  Python 3: $(python3 --version)" && \
     echo "  ARM GCC: $(arm-none-eabi-gcc --version | head -1)" && \
     echo "  Zig: $(zig version)" && \
-    test -d /firmware && echo "  QMK firmware: present" && \
     test -f /usr/bin/make && echo "  Make: present" && \
     true
 
