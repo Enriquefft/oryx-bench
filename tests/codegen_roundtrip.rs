@@ -285,7 +285,7 @@ fn generator_with_features_produces_features_c() {
 
     // Key overrides emit a key_override_t table.
     assert!(gen.features_c.contains("ko_make_basic"));
-    assert!(gen.features_c.contains("MOD_LSHIFT"));
+    assert!(gen.features_c.contains("MOD_LSFT"));
     // config.h reflects the [config] section.
     assert!(gen.config_h.contains("#define TAPPING_TERM_MS 220"));
     // rules.mk enables KEY_OVERRIDE_ENABLE.

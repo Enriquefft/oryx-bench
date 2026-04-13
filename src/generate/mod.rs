@@ -89,7 +89,7 @@ pub fn generate_all(
         layout,
         &tap_dances,
     )?;
-    let features_h = features::emit_features_h(&custom_keycodes, &tap_dances);
+    let features_h = features::emit_features_h(&custom_keycodes, &tap_dances, &layer_table);
     let config_h = config_h::emit_config_h(features)?;
     let rules_mk = rules_mk::emit_rules_mk(features, overlay_dir, !tap_dances.is_empty())?;
 
