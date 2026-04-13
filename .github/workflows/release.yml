@@ -127,20 +127,54 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Update PKGBUILD version
+      - name: Update PKGBUILD version and checksums
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
         run: |
-          VERSION=${{ needs.verify.outputs.version }}
           sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packaging/aur/PKGBUILD
           sed -i "s/^pkgrel=.*/pkgrel=1/" packaging/aur/PKGBUILD
 
-      - uses: KSXGitHub/github-actions-deploy-aur@v3
-        with:
-          pkgname: oryx-bench-bin
-          pkgbuild: packaging/aur/PKGBUILD
-          commit_username: "GitHub Actions Bot"
-          commit_email: "github-actions[bot]@users.noreply.github.com"
-          ssh_private_key: ${{ secrets.AUR_SSH_KEY }}
-          commit_message: "upgpkg: oryx-bench ${{ github.ref_name }}"
-          ssh_keyscan_types: rsa,ecdsa,ed25519
-          updpkgsums: true
-          force_push: true
+          X86_SHA=$(curl -fsSL \
+            "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/oryx-bench-v${VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | sha256sum | cut -d' ' -f1)
+          AARCH_SHA=$(curl -fsSL \
+            "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/oryx-bench-v${VERSION}-aarch64-unknown-linux-musl.tar.gz" \
+            | sha256sum | cut -d' ' -f1)
+
+          sed -i "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('${X86_SHA}')/" packaging/aur/PKGBUILD
+          sed -i "s/^sha256sums_aarch64=.*/sha256sums_aarch64=('${AARCH_SHA}')/" packaging/aur/PKGBUILD
+
+      - name: Generate .SRCINFO
+        run: |
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE/packaging/aur:/pkg" \
+            archlinux:latest \
+            bash -c "
+              pacman -Sy --noconfirm base-devel >/dev/null 2>&1
+              useradd -m builder
+              chown -R builder:builder /pkg
+              su builder -c 'cd /pkg && makepkg --printsrcinfo'
+            " > packaging/aur/.SRCINFO
+
+      - name: Setup AUR SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AUR_SSH_KEY }}" > ~/.ssh/aur_key
+          chmod 600 ~/.ssh/aur_key
+          ssh-keyscan -t rsa,ecdsa,ed25519 aur.archlinux.org >> ~/.ssh/known_hosts
+
+      - name: Push to AUR
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          git clone ssh://aur@aur.archlinux.org/oryx-bench-bin.git /tmp/aur-pkg \
+            --config core.sshCommand="ssh -i ~/.ssh/aur_key"
+          cp packaging/aur/PKGBUILD packaging/aur/.SRCINFO /tmp/aur-pkg/
+          cd /tmp/aur-pkg
+          git config user.name "GitHub Actions Bot"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config core.sshCommand "ssh -i ~/.ssh/aur_key"
+          git add PKGBUILD .SRCINFO
+          git diff --staged --quiet && echo "No changes to push" && exit 0
+          git commit -m "upgpkg: oryx-bench-bin v${VERSION}"
+          git push
