@@ -1,6 +1,22 @@
+# Git hooks via lefthook (in the Nix devshell).
+# Install once: `lefthook install`
+#
+# pre-commit: fast — just auto-format staged .rs files.
+# pre-push:   full CI gate — fmt check, clippy, tests.
+
 pre-commit:
   commands:
     fmt:
       run: cargo fmt --all
       glob: "*.rs"
       stage_fixed: true
+
+pre-push:
+  parallel: true
+  commands:
+    fmt:
+      run: cargo fmt --all -- --check
+    clippy:
+      run: cargo clippy --all --all-targets -- -D warnings
+    test:
+      run: cargo test --all
