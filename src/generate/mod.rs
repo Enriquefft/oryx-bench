@@ -3,9 +3,9 @@
 //! Translates [`CanonicalLayout`] + [`FeaturesToml`] + the contents of
 //! `overlay/` into the C source files QMK consumes:
 //!
-//! - `keymap.c`        — `LAYOUT_<board>(...)` arrays + `enum layers`
-//! - `_features.c`     — Tier 1 declarative feature bodies (achordion, key overrides, combos, macros) + `process_record_user` dispatch
-//! - `_features.h`     — declarations shared between `keymap.c` and `_features.c` (custom-keycode enum, etc.)
+//! - `keymap.c`        — `LAYOUT_<board>(...)` arrays + combo definitions
+//! - `_features.c`     — Tier 1 declarative feature bodies (achordion, key overrides, macros) + `process_record_user` dispatch
+//! - `_features.h`     — declarations shared between `keymap.c` and `_features.c` (layer enum, custom-keycode enum, etc.)
 //! - `config.h`        — `[config]` defines from features.toml
 //! - `rules.mk`        — feature flags + `SRC +=` entries for `overlay/*.{c,zig}`
 //!
@@ -71,8 +71,17 @@ pub fn generate_all(
         }
     }
 
-    let keymap_c =
+    let mut keymap_c =
         keymap::emit_keymap_c(layout, geom, &layer_table, &custom_keycodes, &tap_dances)?;
+
+    // Combos must live in keymap.c -- QMK's keymap_introspection.c includes
+    // keymap.c via `#include KEYMAP_C` and expects `combo_t key_combos[]`
+    // to be defined in that translation unit.
+    if !features.combos.is_empty() {
+        keymap_c.push('\n');
+        keymap_c.push_str(&features::emit_combos(features, layout)?);
+    }
+
     let features_c = features::emit_features_c(
         features,
         &layer_table,

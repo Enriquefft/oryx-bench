@@ -99,7 +99,7 @@ pub fn emit_features_c(
     features: &FeaturesToml,
     layers: &LayerTable,
     custom_keycodes: &CustomKeycodeTable,
-    layout: &CanonicalLayout,
+    _layout: &CanonicalLayout,
     tap_dances: &TapDanceTable,
 ) -> Result<String> {
     let mut out = String::new();
@@ -113,7 +113,12 @@ pub fn emit_features_c(
         .map(|a| a.enabled)
         .unwrap_or(false)
     {
+        // Suppress deprecation #warning in legacy achordion.h — QMK
+        // compiles with -Werror. Module-based replacement not in ZSA fork yet.
+        out.push_str("#pragma GCC diagnostic push\n");
+        out.push_str("#pragma GCC diagnostic ignored \"-Wcpp\"\n");
         out.push_str("#include \"achordion.h\"\n");
+        out.push_str("#pragma GCC diagnostic pop\n");
     }
     out.push('\n');
 
@@ -136,10 +141,9 @@ pub fn emit_features_c(
         out.push('\n');
     }
 
-    if !features.combos.is_empty() {
-        out.push_str(&emit_combos(features, layout)?);
-        out.push('\n');
-    }
+    // NOTE: combos are emitted in keymap.c (not here) because QMK's
+    // keymap_introspection.c includes keymap.c via `#include KEYMAP_C`
+    // and expects `combo_t key_combos[]` to be visible there.
 
     if let Some(achordion) = &features.achordion {
         if achordion.enabled {
@@ -343,7 +347,7 @@ fn escape_c_string(s: &str) -> String {
 /// unbound key. The previous behavior of writing a `// skipped`
 /// comment into the C source silently dropped combos at build time;
 /// failing the build is the only way to surface the bug.
-fn emit_combos(features: &FeaturesToml, layout: &CanonicalLayout) -> Result<String> {
+pub fn emit_combos(features: &FeaturesToml, layout: &CanonicalLayout) -> Result<String> {
     let mut out = String::from("// Combos\n");
 
     let geom = crate::schema::geometry::get(layout.geometry.as_str()).ok_or_else(|| {

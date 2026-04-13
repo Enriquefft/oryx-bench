@@ -74,7 +74,19 @@ RUN set -e && \
     cd /firmware && \
     git clone --filter=blob:none https://github.com/zsa/qmk_firmware.git . && \
     git checkout "${REF}" && \
+    git submodule update --init --recursive --depth=1 && \
     echo "Pinned to: $(git rev-parse HEAD)"
+
+# Mark all directories as safe for any UID. The container runs with
+# --user to match the host UID, but /firmware is owned by root.
+# Without this, git warnings in QMK's Makefile $(shell) corrupt the
+# Makefile parse — the colon in "fatal:" causes "multiple target
+# patterns" errors. Wildcard is safe — this is an isolated build container.
+RUN git config --system --add safe.directory '*'
+
+# QMK's Makefile uses bash-isms (|| in recipes). Ubuntu 24.04
+# defaults /bin/sh to dash which chokes on these.
+RUN ln -sf /bin/bash /bin/sh
 
 # Install QMK CLI and firmware Python dependencies.
 # `qmk` (the CLI) is a separate package from the firmware repo's

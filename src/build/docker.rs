@@ -131,6 +131,27 @@ pub fn build(project: &Project, generated: &Generated, dry_run: bool) -> Result<
     fsx::atomic_write(&keymap_dir.join("config.h"), generated.config_h.as_bytes())?;
     fsx::atomic_write(&keymap_dir.join("rules.mk"), generated.rules_mk.as_bytes())?;
 
+    // Stage overlay C and H files (Tier 2′ vendored code). Referenced
+    // by SRC += in rules.mk and #include in _features.c. The bind-mount
+    // only exposes the keymap dir to the container.
+    let overlay = project.overlay_dir();
+    if overlay.is_dir() {
+        for entry in std::fs::read_dir(&overlay)
+            .with_context(|| format!("reading overlay dir {}", overlay.display()))?
+        {
+            let entry = entry?;
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str.ends_with(".c") || name_str.ends_with(".h") {
+                let src = entry.path();
+                let dst = keymap_dir.join(&name);
+                std::fs::copy(&src, &dst).with_context(|| {
+                    format!("copying {} to keymap dir", src.display())
+                })?;
+            }
+        }
+    }
+
     // Compute input sha and consult the cache.
     let sha = input_sha(generated, Some(&project.overlay_dir()))?;
     let cached_sha = std::fs::read_to_string(build_sha_path(project)).ok();
@@ -183,6 +204,7 @@ pub fn build(project: &Project, generated: &Generated, dry_run: bool) -> Result<
     // Bind-mount the project root at /work (for QMK output) and the
     // staged keymap directory into the firmware tree where QMK expects
     // it: /firmware/keyboards/zsa/voyager/keymaps/oryx-bench/.
+    // /firmware is root-owned. Give QMK a writable tmpfs for build artifacts.
     cmd.arg("-v")
         .arg(format!("{}:/work", project.root.display()))
         .arg("-v")
@@ -190,6 +212,8 @@ pub fn build(project: &Project, generated: &Generated, dry_run: bool) -> Result<
             "{}:/firmware/keyboards/zsa/voyager/keymaps/oryx-bench:ro",
             keymap_dir.display()
         ))
+        .arg("--tmpfs")
+        .arg("/firmware/.build:rw,exec")
         .arg("-w")
         .arg("/work")
         .arg(IMAGE_TAG)
