@@ -1,19 +1,22 @@
-//! Hand-rolled split-grid renderer.
+//! Hand-rolled split-grid renderer with box-drawing characters.
 //!
-//! Not built on `tabled` — the Voyager's shape doesn't fit `tabled`'s
-//! rectangular model. ~100 lines of straightforward formatting code.
+//! Renders each keyboard half as a separate labeled grid with dynamic
+//! per-column widths and human-friendly key labels.
+
+use std::fmt::Write;
 
 use crate::schema::canonical::{CanonicalAction, CanonicalKey, CanonicalLayer, LayerRef};
-use crate::schema::geometry::{Geometry, GridLayout, Hand, ThumbCluster};
+use crate::schema::geometry::{Geometry, GridLayout, Hand, ThumbKey, ThumbKeyWidth};
 use crate::schema::keycode::{Keycode, Modifier};
 
 use super::RenderOptions;
 
-/// Render a single layer as an ASCII split-grid keyboard picture.
+// ── Public entry point ─────────────────────────────────────────────
+
+/// Render a single layer as two labeled box-drawing grids (one per hand)
+/// with dynamic column widths, human-friendly labels, and a legend.
 ///
-/// `all_layers` is used to resolve layer names to position numbers in
-/// compact labels (e.g. `LT(Sym+Num, KC_BSPC)` → `1:BSPC`). Pass
-/// the full `CanonicalLayout.layers` slice.
+/// `all_layers` is used to resolve layer names in LT/MO labels.
 pub fn render_layer(
     geom: &dyn Geometry,
     layer: &CanonicalLayer,
@@ -21,153 +24,154 @@ pub fn render_layer(
     opts: &RenderOptions,
 ) -> String {
     let grid = geom.ascii_layout();
-    // Fits most compact labels (e.g. "1:BSPC" = 6, "LA:ENT" = 6).
-    // Longer names are truncated with `…`.
-    const CELL_WIDTH: usize = 7;
 
-    // Pre-format each cell.
-    let cell = |idx: usize| -> String {
-        let s = if opts.show_position_names {
+    let label = |idx: usize| -> String {
+        if opts.show_position_names {
             geom.index_to_position(idx).unwrap_or("?").to_string()
         } else {
             layer
                 .keys
                 .get(idx)
-                .map(|k| compact_key(k, all_layers))
+                .map(|k| friendly_key(k, all_layers))
                 .unwrap_or_default()
-        };
-        let formatted = truncate_with_ellipsis(&s, CELL_WIDTH);
-        format!("{formatted:<CELL_WIDTH$}")
+        }
     };
+
+    // Collect labels for each half.
+    let left_rows: Vec<Vec<String>> = grid
+        .rows
+        .iter()
+        .map(|row| {
+            row.left
+                .iter()
+                .map(|mi| mi.map(&label).unwrap_or_default())
+                .collect()
+        })
+        .collect();
+
+    let right_rows: Vec<Vec<String>> = grid
+        .rows
+        .iter()
+        .map(|row| {
+            row.right
+                .iter()
+                .map(|mi| mi.map(&label).unwrap_or_default())
+                .collect()
+        })
+        .collect();
+
+    let left_widths = compute_col_widths(&left_rows);
+    let right_widths = compute_col_widths(&right_rows);
+
+    let (left_thumbs, right_thumbs) = split_thumbs_by_hand(grid);
 
     let mut out = String::new();
 
-    // Main matrix rows
-    for row in grid.rows {
-        let mut line = String::new();
-        for maybe_idx in row.left {
-            line.push('|');
-            line.push_str(&match *maybe_idx {
-                Some(i) => cell(i),
-                None => " ".repeat(CELL_WIDTH),
-            });
-        }
-        line.push('|');
-        // Gap between halves
-        line.push_str("    ");
-        for maybe_idx in row.right {
-            line.push('|');
-            line.push_str(&match *maybe_idx {
-                Some(i) => cell(i),
-                None => " ".repeat(CELL_WIDTH),
-            });
-        }
-        line.push('|');
-        out.push_str(&line);
-        out.push('\n');
+    // Left half
+    out.push_str("Left:\n");
+    render_grid(&mut out, &left_rows, &left_widths);
+    if !left_thumbs.is_empty() {
+        let matrix_w = grid_total_width(&left_widths);
+        render_thumbs(&mut out, &left_thumbs, Hand::Left, matrix_w, &label);
     }
 
-    // Thumb clusters — render below the main matrix, aligned under the
-    // two halves they belong to.
-    if !grid.thumb_clusters.is_empty() {
-        out.push('\n');
-        let (left_thumbs, right_thumbs) = split_thumbs_by_hand(grid);
-        let max_len = left_thumbs.len().max(right_thumbs.len());
-        for i in 0..max_len {
-            let left_cell = left_thumbs
-                .get(i)
-                .map(|&idx| cell(idx))
-                .unwrap_or_else(|| " ".repeat(CELL_WIDTH));
-            let right_cell = right_thumbs
-                .get(i)
-                .map(|&idx| cell(idx))
-                .unwrap_or_else(|| " ".repeat(CELL_WIDTH));
-            out.push_str(&format!(
-                "{:>pad$}|{left_cell}|    |{right_cell}|\n",
-                "",
-                pad = CELL_WIDTH * 4 + 5,
-            ));
-        }
+    out.push('\n');
+
+    // Right half
+    out.push_str("Right:\n");
+    render_grid(&mut out, &right_rows, &right_widths);
+    if !right_thumbs.is_empty() {
+        let matrix_w = grid_total_width(&right_widths);
+        render_thumbs(&mut out, &right_thumbs, Hand::Right, matrix_w, &label);
     }
+
+    // Legend
+    out.push_str("\nX/Mod = tap X, hold Mod    X/Layer = tap X, hold layer\n");
+
     out
 }
 
-// ── Compact label rendering ─────────────────────────────────────────
+// ── Human-friendly label rendering ─────────────────────────────────
 //
-// Produces short, information-dense labels for the fixed-width ASCII
-// grid. The full verbose `CanonicalKey::display()` is for code
-// generation and explain output; the compact form here is for visual
-// scanning at a glance.
-//
-// Key transformations:
-//   - KC_ prefix stripped from all keycodes
-//   - Long keycode names use QMK short aliases (ENTER→ENT, SLASH→SLSH)
-//   - LT: `<layer_position>:<tap>` (e.g. `1:BSPC`)
-//   - ModTap: `<2-char modifier>:<tap>` (e.g. `LA:ENT`)
-//   - MO/TG/TO: `MO(<pos>)`, `TG(<pos>)`, etc.
-//   - Modified: `<mod_chain>(<tap>)` with abbreviated mods
+// Produces readable labels: `ENT/Alt` instead of `LA:ENT`,
+// `BSPC/Sym+Num` instead of `1:BSPC`, `,` instead of `COMM`.
 
-fn compact_key(key: &CanonicalKey, layers: &[CanonicalLayer]) -> String {
+fn friendly_key(key: &CanonicalKey, layers: &[CanonicalLayer]) -> String {
     match (&key.tap, &key.hold) {
         (Some(CanonicalAction::Lt { layer, tap }), _) => {
-            let lr = compact_layer_ref(layer, layers);
-            let t = compact_action(tap, layers);
-            format!("{lr}:{t}")
+            let t = friendly_action(tap, layers);
+            let l = layer_display_name(layer, layers);
+            format!("{t}/{l}")
         }
         (Some(CanonicalAction::ModTap { mod_, tap }), _) => {
-            let m = short_modifier(mod_);
-            let t = compact_action(tap, layers);
-            format!("{m}:{t}")
+            let t = friendly_action(tap, layers);
+            let m = friendly_modifier(mod_);
+            format!("{t}/{m}")
         }
         (Some(t), Some(h)) => {
             format!(
                 "{}/{}",
-                compact_action(t, layers),
-                compact_action(h, layers)
+                friendly_action(t, layers),
+                friendly_hold(h, layers)
             )
         }
-        (Some(t), None) => compact_action(t, layers),
-        (None, Some(h)) => format!("/{}", compact_action(h, layers)),
+        (Some(t), None) => friendly_action(t, layers),
+        (None, Some(h)) => format!("/{}", friendly_hold(h, layers)),
         (None, None) => String::new(),
     }
 }
 
-fn compact_action(action: &CanonicalAction, layers: &[CanonicalLayer]) -> String {
+/// Render a hold-layer action with friendly modifier names.
+/// Standalone `Modifier` uses the short form (Sft, Alt) since the
+/// physical position already implies L/R.
+fn friendly_hold(action: &CanonicalAction, layers: &[CanonicalLayer]) -> String {
     match action {
-        CanonicalAction::Keycode(kc) => short_keycode(kc),
+        CanonicalAction::Modifier(m) => friendly_modifier(m).to_string(),
+        other => friendly_action(other, layers),
+    }
+}
+
+fn friendly_action(action: &CanonicalAction, layers: &[CanonicalLayer]) -> String {
+    match action {
+        CanonicalAction::Keycode(kc) => friendly_keycode(kc),
+        // Standalone modifier as a tap action — keep L/R distinction.
         CanonicalAction::Modifier(m) => m.canonical_name().to_string(),
         CanonicalAction::Mo { layer } => {
-            format!("MO({})", compact_layer_ref(layer, layers))
+            format!("MO({})", layer_display_name(layer, layers))
         }
         CanonicalAction::Tg { layer } => {
-            format!("TG({})", compact_layer_ref(layer, layers))
+            format!("TG({})", layer_display_name(layer, layers))
         }
         CanonicalAction::To { layer } => {
-            format!("TO({})", compact_layer_ref(layer, layers))
+            format!("TO({})", layer_display_name(layer, layers))
         }
         CanonicalAction::Tt { layer } => {
-            format!("TT({})", compact_layer_ref(layer, layers))
+            format!("TT({})", layer_display_name(layer, layers))
         }
         CanonicalAction::Df { layer } => {
-            format!("DF({})", compact_layer_ref(layer, layers))
+            format!("DF({})", layer_display_name(layer, layers))
         }
         CanonicalAction::Lt { layer, tap } => {
             format!(
-                "{}:{}",
-                compact_layer_ref(layer, layers),
-                compact_action(tap, layers)
+                "{}/{}",
+                friendly_action(tap, layers),
+                layer_display_name(layer, layers)
             )
         }
         CanonicalAction::ModTap { mod_, tap } => {
-            format!("{}:{}", short_modifier(mod_), compact_action(tap, layers))
+            format!(
+                "{}/{}",
+                friendly_action(tap, layers),
+                friendly_modifier(mod_)
+            )
         }
         CanonicalAction::Modified { mods, base } => {
             let chain: String = mods
                 .iter()
-                .map(|m| short_modifier(m).to_string())
+                .map(|m| friendly_modifier(m))
                 .collect::<Vec<_>>()
                 .join("+");
-            format!("{}({})", chain, compact_action(base, layers))
+            format!("{}({})", chain, friendly_action(base, layers))
         }
         CanonicalAction::Custom(n) => format!("USR{n:02}"),
         CanonicalAction::Transparent => "TRNS".into(),
@@ -175,27 +179,44 @@ fn compact_action(action: &CanonicalAction, layers: &[CanonicalLayer]) -> String
     }
 }
 
-/// Resolve a layer reference to its position number (compact, always
-/// fits). Falls back to the first 2 characters of the name if the
-/// layer isn't found in the table (shouldn't happen in practice).
-fn compact_layer_ref(r: &LayerRef, layers: &[CanonicalLayer]) -> String {
+/// Resolve a layer reference to its human-readable name.
+fn layer_display_name(r: &LayerRef, layers: &[CanonicalLayer]) -> String {
     match r {
         LayerRef::Name(n) => layers
             .iter()
             .find(|l| l.name == *n)
-            .map(|l| l.position.to_string())
-            .unwrap_or_else(|| n.chars().take(2).collect()),
-        LayerRef::Index(i) => i.to_string(),
+            .map(|l| l.name.clone())
+            .unwrap_or_else(|| n.clone()),
+        LayerRef::Index(i) => layers
+            .iter()
+            .find(|l| l.position == *i)
+            .map(|l| l.name.clone())
+            .unwrap_or_else(|| format!("L{i}")),
     }
 }
 
-/// Short keycode name — QMK short alias without KC_ prefix.
-fn short_keycode(kc: &Keycode) -> String {
+/// Human-friendly modifier name. No L/R prefix — the physical
+/// position on the board already tells you which hand.
+fn friendly_modifier(m: &Modifier) -> &'static str {
+    match m {
+        Modifier::Lctl | Modifier::Rctl => "Ctl",
+        Modifier::Lsft | Modifier::Rsft => "Sft",
+        Modifier::Lalt | Modifier::Ralt => "Alt",
+        Modifier::Lgui | Modifier::Rgui => "Gui",
+        Modifier::Hypr => "Hypr",
+        Modifier::Meh => "Meh",
+    }
+}
+
+/// Human-friendly keycode: actual symbols for punctuation,
+/// short names for special keys.
+fn friendly_keycode(kc: &Keycode) -> String {
     use Keycode::*;
     let s: &str = match kc {
         KcNo => return String::new(),
         KcTransparent => "TRNS",
 
+        // Letters
         KcA => "A",
         KcB => "B",
         KcC => "C",
@@ -223,6 +244,7 @@ fn short_keycode(kc: &Keycode) -> String {
         KcY => "Y",
         KcZ => "Z",
 
+        // Digits
         Kc1 => "1",
         Kc2 => "2",
         Kc3 => "3",
@@ -234,6 +256,7 @@ fn short_keycode(kc: &Keycode) -> String {
         Kc9 => "9",
         Kc0 => "0",
 
+        // Function keys
         KcF1 => "F1",
         KcF2 => "F2",
         KcF3 => "F3",
@@ -259,39 +282,42 @@ fn short_keycode(kc: &Keycode) -> String {
         KcF23 => "F23",
         KcF24 => "F24",
 
-        KcGrave => "GRV",
-        KcMinus => "MINS",
-        KcEqual => "EQL",
-        KcLbracket => "LBRC",
-        KcRbracket => "RBRC",
-        KcBslash => "BSLS",
-        KcSemicolon => "SCLN",
-        KcQuote => "QUOT",
-        KcComma => "COMM",
-        KcDot => "DOT",
-        KcSlash => "SLSH",
+        // Punctuation → actual symbols
+        KcGrave => "`",
+        KcMinus => "-",
+        KcEqual => "=",
+        KcLbracket => "[",
+        KcRbracket => "]",
+        KcBslash => "\\",
+        KcSemicolon => ";",
+        KcQuote => "'",
+        KcComma => ",",
+        KcDot => ".",
+        KcSlash => "/",
 
-        KcExclaim => "EXLM",
-        KcAt => "AT",
-        KcHash => "HASH",
-        KcDollar => "DLR",
-        KcPercent => "PERC",
-        KcCircumflex => "CIRC",
-        KcAmpersand => "AMPR",
-        KcAsterisk => "ASTR",
-        KcLparen => "LPRN",
-        KcRparen => "RPRN",
-        KcColon => "COLN",
-        KcLcurly => "LCBR",
-        KcRcurly => "RCBR",
-        KcPlus => "PLUS",
-        KcUnderscore => "UNDS",
-        KcTilde => "TILD",
-        KcPipe => "PIPE",
-        KcDblQuote => "DQUO",
-        KcLessThan => "LABK",
-        KcGreaterThan => "RABK",
+        // Shifted symbols → actual symbols
+        KcExclaim => "!",
+        KcAt => "@",
+        KcHash => "#",
+        KcDollar => "$",
+        KcPercent => "%",
+        KcCircumflex => "^",
+        KcAmpersand => "&",
+        KcAsterisk => "*",
+        KcLparen => "(",
+        KcRparen => ")",
+        KcColon => ":",
+        KcLcurly => "{",
+        KcRcurly => "}",
+        KcPlus => "+",
+        KcUnderscore => "_",
+        KcTilde => "~",
+        KcPipe => "|",
+        KcDblQuote => "\"",
+        KcLessThan => "<",
+        KcGreaterThan => ">",
 
+        // Navigation
         KcLeft => "LEFT",
         KcRight => "RGHT",
         KcUp => "UP",
@@ -301,6 +327,7 @@ fn short_keycode(kc: &Keycode) -> String {
         KcPgup => "PGUP",
         KcPgdn => "PGDN",
 
+        // Editing / special
         KcEnter => "ENT",
         KcEscape => "ESC",
         KcBspc => "BSPC",
@@ -313,6 +340,7 @@ fn short_keycode(kc: &Keycode) -> String {
         KcScrollLock => "SCRL",
         KcPause => "PAUS",
 
+        // Modifier keycodes (standalone, not mod-tap)
         KcLctl => "LCTL",
         KcLsft => "LSFT",
         KcLalt => "LALT",
@@ -322,6 +350,7 @@ fn short_keycode(kc: &Keycode) -> String {
         KcRalt => "RALT",
         KcRgui => "RGUI",
 
+        // Keypad
         KcKp0 => "KP_0",
         KcKp1 => "KP_1",
         KcKp2 => "KP_2",
@@ -341,6 +370,7 @@ fn short_keycode(kc: &Keycode) -> String {
         KcKpEqual => "KP_EQ",
         KcNumLock => "NLCK",
 
+        // Media
         KcAudioMute => "MUTE",
         KcAudioVolUp => "VOLU",
         KcAudioVolDown => "VOLD",
@@ -349,10 +379,12 @@ fn short_keycode(kc: &Keycode) -> String {
         KcMediaPrev => "MPRV",
         KcMediaStop => "MSTP",
 
+        // System
         KcSystemPower => "PWR",
         KcSystemSleep => "SLEP",
         KcSystemWake => "WAKE",
 
+        // Mouse
         KcMsUp => "MS_U",
         KcMsDown => "MS_D",
         KcMsLeft => "MS_L",
@@ -365,6 +397,7 @@ fn short_keycode(kc: &Keycode) -> String {
         KcMsWhLeft => "WH_L",
         KcMsWhRight => "WH_R",
 
+        // RGB
         KcRgbToggle => "RTOG",
         KcRgbModeForward => "RMOD",
         KcRgbModeReverse => "RRMOD",
@@ -375,11 +408,11 @@ fn short_keycode(kc: &Keycode) -> String {
         KcRgbValUp => "RVAI",
         KcRgbValDown => "RVAD",
 
+        // QMK
         KcBootloader => "BOOT",
         KcReset => "RESET",
 
         Other(s) => {
-            // Strip common prefixes (KC_, US_, etc.) for consistency.
             return s
                 .strip_prefix("KC_")
                 .or_else(|| s.strip_prefix("US_"))
@@ -390,55 +423,171 @@ fn short_keycode(kc: &Keycode) -> String {
     s.into()
 }
 
-/// 2-character modifier abbreviation for compact rendering.
-fn short_modifier(m: &Modifier) -> &'static str {
-    match m {
-        Modifier::Lctl => "LC",
-        Modifier::Lsft => "LS",
-        Modifier::Lalt => "LA",
-        Modifier::Lgui => "LG",
-        Modifier::Rctl => "RC",
-        Modifier::Rsft => "RS",
-        Modifier::Ralt => "RA",
-        Modifier::Rgui => "RG",
-        Modifier::Hypr => "HY",
-        Modifier::Meh => "ME",
+// ── Column width computation ────────────────────────────────────────
+
+/// Compute per-column content widths (minimum 1 character).
+fn compute_col_widths(rows: &[Vec<String>]) -> Vec<usize> {
+    let ncols = rows.first().map(|r| r.len()).unwrap_or(0);
+    let mut widths = vec![1usize; ncols];
+    for row in rows {
+        for (col, lbl) in row.iter().enumerate() {
+            widths[col] = widths[col].max(lbl.chars().count());
+        }
     }
+    widths
 }
 
-// ── Truncation ──────────────────────────────────────────────────────
-
-/// Truncate `s` to at most `width` characters. When truncation happens
-/// the last kept character is replaced with `…` so the user can tell
-/// at a glance that the cell is eliding content rather than showing
-/// the full binding. (The previous renderer silently cut characters
-/// off the right edge, which made `LT(Sym+Num, KC_BSPC)` and
-/// `LT(Sym+Num,` look identical in the grid.)
-fn truncate_with_ellipsis(s: &str, width: usize) -> String {
-    let len = s.chars().count();
-    if len <= width {
-        return s.to_string();
-    }
-    if width == 0 {
-        return String::new();
-    }
-    let mut out: String = s.chars().take(width.saturating_sub(1)).collect();
-    out.push('…');
-    out
+/// Total display width of a box-drawing grid with given column content
+/// widths. Each column occupies `w + 2` (1 space padding each side),
+/// plus `n + 1` border characters.
+fn grid_total_width(widths: &[usize]) -> usize {
+    widths.iter().sum::<usize>() + 3 * widths.len() + 1
 }
 
-fn split_thumbs_by_hand(grid: &'static GridLayout) -> (Vec<usize>, Vec<usize>) {
+// ── Box-drawing grid ────────────────────────────────────────────────
+
+enum BorderKind {
+    Top,
+    Mid,
+    Bot,
+}
+
+fn push_h_border(out: &mut String, widths: &[usize], kind: BorderKind) {
+    let (left, cross, right) = match kind {
+        BorderKind::Top => ('┌', '┬', '┐'),
+        BorderKind::Mid => ('├', '┼', '┤'),
+        BorderKind::Bot => ('└', '┴', '┘'),
+    };
+    out.push(left);
+    for (i, &w) in widths.iter().enumerate() {
+        for _ in 0..w + 2 {
+            out.push('─');
+        }
+        if i < widths.len() - 1 {
+            out.push(cross);
+        }
+    }
+    out.push(right);
+}
+
+fn render_grid(out: &mut String, rows: &[Vec<String>], widths: &[usize]) {
+    push_h_border(out, widths, BorderKind::Top);
+    out.push('\n');
+
+    for (i, row) in rows.iter().enumerate() {
+        out.push('│');
+        for (col, label) in row.iter().enumerate() {
+            let w = widths[col];
+            let _ = write!(out, " {:^w$} │", label);
+        }
+        out.push('\n');
+
+        if i < rows.len() - 1 {
+            push_h_border(out, widths, BorderKind::Mid);
+            out.push('\n');
+        }
+    }
+
+    push_h_border(out, widths, BorderKind::Bot);
+    out.push('\n');
+}
+
+// ── Thumb cluster rendering ─────────────────────────────────────────
+
+fn split_thumbs_by_hand(
+    grid: &'static GridLayout,
+) -> (Vec<&'static ThumbKey>, Vec<&'static ThumbKey>) {
     let mut left = Vec::new();
     let mut right = Vec::new();
     for cluster in grid.thumb_clusters {
-        let ThumbCluster { hand, keys } = cluster;
-        match hand {
-            Hand::Left => left.extend_from_slice(keys),
-            Hand::Right => right.extend_from_slice(keys),
+        match cluster.hand {
+            Hand::Left => left.extend(cluster.keys.iter()),
+            Hand::Right => right.extend(cluster.keys.iter()),
         }
     }
     (left, right)
 }
+
+/// Render thumb keys as a single-row box-drawing grid with size distinction.
+///
+/// Display order:
+/// - Left hand: \[outer, inner\] (outer at left edge, inner near split gap)
+/// - Right hand: \[inner, outer\] (inner near gap, outer at right edge)
+///
+/// The outer (Wide) key cell is at least 1.5× the inner (Standard) cell
+/// width, reflecting the physical 1u vs 1.5u key sizes.
+fn render_thumbs(
+    out: &mut String,
+    thumbs: &[&'static ThumbKey],
+    hand: Hand,
+    matrix_width: usize,
+    label: &dyn Fn(usize) -> String,
+) {
+    if thumbs.is_empty() {
+        return;
+    }
+
+    // Physical display order: left hand reverses (outer first).
+    let ordered: Vec<&ThumbKey> = if hand == Hand::Left {
+        thumbs.iter().rev().copied().collect()
+    } else {
+        thumbs.to_vec()
+    };
+
+    let labels: Vec<String> = ordered.iter().map(|tk| label(tk.index)).collect();
+
+    // Determine content widths with physical size constraints.
+    let standard_content: usize = ordered
+        .iter()
+        .zip(labels.iter())
+        .filter(|(tk, _)| tk.width == ThumbKeyWidth::Standard)
+        .map(|(_, l)| l.chars().count().max(3))
+        .max()
+        .unwrap_or(3);
+
+    // Wide key minimum: ceil(standard × 1.5)
+    let wide_min = (standard_content * 3 + 1) / 2;
+
+    let cell_widths: Vec<usize> = ordered
+        .iter()
+        .zip(labels.iter())
+        .map(|(tk, lbl)| {
+            let content_len = lbl.chars().count();
+            match tk.width {
+                ThumbKeyWidth::Standard => content_len.max(standard_content),
+                ThumbKeyWidth::Wide => content_len.max(wide_min),
+            }
+        })
+        .collect();
+
+    let thumb_total = grid_total_width(&cell_widths);
+
+    // Alignment: left-hand thumbs right-aligned under matrix,
+    // right-hand thumbs left-aligned.
+    let indent = match hand {
+        Hand::Left => matrix_width.saturating_sub(thumb_total),
+        Hand::Right => 0,
+    };
+    let pad = " ".repeat(indent);
+
+    out.push_str(&pad);
+    push_h_border(out, &cell_widths, BorderKind::Top);
+    out.push('\n');
+
+    out.push_str(&pad);
+    out.push('│');
+    for (i, lbl) in labels.iter().enumerate() {
+        let w = cell_widths[i];
+        let _ = write!(out, " {:^w$} │", lbl);
+    }
+    out.push('\n');
+
+    out.push_str(&pad);
+    push_h_border(out, &cell_widths, BorderKind::Bot);
+    out.push('\n');
+}
+
+// ── Tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -458,35 +607,21 @@ mod tests {
             std::slice::from_ref(&layer),
             &RenderOptions::default(),
         );
-        // Empty keys render as blank (KC_NO compact form).
-        assert!(out.lines().count() > 4);
+        // Should produce two labeled halves with box-drawing.
+        assert!(
+            out.contains("Left:"),
+            "expected Left: label in output:\n{out}"
+        );
+        assert!(
+            out.contains("Right:"),
+            "expected Right: label in output:\n{out}"
+        );
+        assert!(out.contains('┌'), "expected box-drawing in output:\n{out}");
+        assert!(out.contains('│'), "expected box-drawing in output:\n{out}");
     }
 
     #[test]
-    fn truncate_with_ellipsis_no_change_when_fits() {
-        assert_eq!(truncate_with_ellipsis("KC_A", 7), "KC_A");
-        assert_eq!(truncate_with_ellipsis("KC_BSPC", 7), "KC_BSPC");
-    }
-
-    #[test]
-    fn truncate_with_ellipsis_appends_marker() {
-        // 7 chars kept — 6 first chars + ellipsis.
-        assert_eq!(truncate_with_ellipsis("LT(Sym+Num, KC_BSPC)", 7), "LT(Sym…");
-    }
-
-    #[test]
-    fn truncate_with_ellipsis_handles_zero_width() {
-        assert_eq!(truncate_with_ellipsis("anything", 0), "");
-    }
-
-    #[test]
-    fn truncate_with_ellipsis_width_one() {
-        // Width 1 means the ellipsis alone.
-        assert_eq!(truncate_with_ellipsis("anything", 1), "…");
-    }
-
-    #[test]
-    fn renders_position_names_with_flag() {
+    fn renders_position_names_without_truncation() {
         let layer = CanonicalLayer {
             name: "Test".into(),
             position: 0,
@@ -500,17 +635,31 @@ mod tests {
                 show_position_names: true,
             },
         );
-        // Position names like "L_pinky_num" are wider than our 7-char
-        // cell, so they render with the ellipsis truncation marker.
+        // Position names should appear in full (no ellipsis truncation).
         assert!(
-            out.contains("L_pink…"),
-            "expected truncated position name with ellipsis in output:\n{out}"
+            out.contains("L_pinky_num"),
+            "expected full position name in output:\n{out}"
+        );
+        assert!(
+            !out.contains('…'),
+            "no truncation ellipsis expected:\n{out}"
         );
     }
 
     #[test]
-    fn compact_lt_uses_position_colon_tap() {
-        use crate::schema::canonical::CanonicalAction;
+    fn friendly_mod_tap_format() {
+        let key = CanonicalKey {
+            tap: Some(CanonicalAction::ModTap {
+                mod_: Modifier::Lalt,
+                tap: Box::new(CanonicalAction::Keycode(Keycode::KcEnter)),
+            }),
+            ..Default::default()
+        };
+        assert_eq!(friendly_key(&key, &[]), "ENT/Alt");
+    }
+
+    #[test]
+    fn friendly_layer_tap_format() {
         let layers = vec![
             CanonicalLayer {
                 name: "Main".into(),
@@ -530,29 +679,85 @@ mod tests {
             }),
             ..Default::default()
         };
-        let label = compact_key(&key, &layers);
-        assert_eq!(label, "1:BSPC");
+        assert_eq!(friendly_key(&key, &layers), "BSPC/Sym+Num");
     }
 
     #[test]
-    fn compact_mod_tap_uses_short_mod_colon_tap() {
+    fn friendly_hold_only_modifier() {
         let key = CanonicalKey {
-            tap: Some(CanonicalAction::ModTap {
-                mod_: Modifier::Lalt,
-                tap: Box::new(CanonicalAction::Keycode(Keycode::KcEnter)),
-            }),
+            tap: None,
+            hold: Some(CanonicalAction::Modifier(Modifier::Lsft)),
             ..Default::default()
         };
-        let label = compact_key(&key, &[]);
-        assert_eq!(label, "LA:ENT");
+        assert_eq!(friendly_key(&key, &[]), "/Sft");
     }
 
     #[test]
-    fn compact_keycode_strips_kc_prefix() {
-        assert_eq!(short_keycode(&Keycode::KcSlash), "SLSH");
-        assert_eq!(short_keycode(&Keycode::KcComma), "COMM");
-        assert_eq!(short_keycode(&Keycode::KcQuote), "QUOT");
-        assert_eq!(short_keycode(&Keycode::KcA), "A");
-        assert_eq!(short_keycode(&Keycode::KcBspc), "BSPC");
+    fn friendly_keycode_symbols() {
+        assert_eq!(friendly_keycode(&Keycode::KcComma), ",");
+        assert_eq!(friendly_keycode(&Keycode::KcSlash), "/");
+        assert_eq!(friendly_keycode(&Keycode::KcQuote), "'");
+        assert_eq!(friendly_keycode(&Keycode::KcSemicolon), ";");
+        assert_eq!(friendly_keycode(&Keycode::KcMinus), "-");
+        assert_eq!(friendly_keycode(&Keycode::KcEqual), "=");
+        assert_eq!(friendly_keycode(&Keycode::KcBslash), "\\");
+        assert_eq!(friendly_keycode(&Keycode::KcGrave), "`");
+    }
+
+    #[test]
+    fn friendly_keycode_special_keys() {
+        assert_eq!(friendly_keycode(&Keycode::KcEnter), "ENT");
+        assert_eq!(friendly_keycode(&Keycode::KcBspc), "BSPC");
+        assert_eq!(friendly_keycode(&Keycode::KcSpace), "SPC");
+        assert_eq!(friendly_keycode(&Keycode::KcA), "A");
+        assert_eq!(friendly_keycode(&Keycode::Kc1), "1");
+    }
+
+    #[test]
+    fn friendly_modifier_names() {
+        assert_eq!(friendly_modifier(&Modifier::Lalt), "Alt");
+        assert_eq!(friendly_modifier(&Modifier::Ralt), "Alt");
+        assert_eq!(friendly_modifier(&Modifier::Lctl), "Ctl");
+        assert_eq!(friendly_modifier(&Modifier::Lsft), "Sft");
+        assert_eq!(friendly_modifier(&Modifier::Lgui), "Gui");
+    }
+
+    #[test]
+    fn box_drawing_grid_structure() {
+        let rows = vec![
+            vec!["A".to_string(), "BB".to_string()],
+            vec!["CCC".to_string(), "D".to_string()],
+        ];
+        let widths = compute_col_widths(&rows);
+        assert_eq!(widths, vec![3, 2]);
+
+        let mut out = String::new();
+        render_grid(&mut out, &rows, &widths);
+        // Verify box-drawing structure.
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines[0], "┌─────┬────┐");
+        assert_eq!(lines[1], "│  A  │ BB │");
+        assert_eq!(lines[2], "├─────┼────┤");
+        assert_eq!(lines[3], "│ CCC │ D  │");
+        assert_eq!(lines[4], "└─────┴────┘");
+    }
+
+    #[test]
+    fn legend_present() {
+        let layer = CanonicalLayer {
+            name: "Test".into(),
+            position: 0,
+            keys: vec![CanonicalKey::default(); 52],
+        };
+        let out = render_layer(
+            &Voyager,
+            &layer,
+            std::slice::from_ref(&layer),
+            &RenderOptions::default(),
+        );
+        assert!(
+            out.contains("X/Mod = tap X, hold Mod"),
+            "expected legend in output:\n{out}"
+        );
     }
 }

@@ -1,11 +1,34 @@
 ---
 source: tests/render_snapshot.rs
+assertion_line: 58
 expression: out
 ---
-|L_oute…|L_pink…|L_ring…|L_midd…|L_inde…|L_inne…|    |R_inne…|R_inde…|R_midd…|R_ring…|R_pink…|R_oute…|
-|L_oute…|L_pink…|L_ring…|L_midd…|L_inde…|L_inne…|    |R_inne…|R_inde…|R_midd…|R_ring…|R_pink…|R_oute…|
-|L_oute…|L_pink…|L_ring…|L_midd…|L_inde…|L_inne…|    |R_inne…|R_inde…|R_midd…|R_ring…|R_pink…|R_oute…|
-|L_oute…|L_pink…|L_ring…|L_midd…|L_inde…|L_inne…|    |R_inne…|R_inde…|R_midd…|R_ring…|R_pink…|R_oute…|
+Left:
+┌────────────────┬────────────────┬───────────────┬─────────────────┬────────────────┬────────────────┐
+│  L_outer_num   │  L_pinky_num   │  L_ring_num   │  L_middle_num   │  L_index_num   │  L_inner_num   │
+├────────────────┼────────────────┼───────────────┼─────────────────┼────────────────┼────────────────┤
+│  L_outer_top   │  L_pinky_top   │  L_ring_top   │  L_middle_top   │  L_index_top   │  L_inner_top   │
+├────────────────┼────────────────┼───────────────┼─────────────────┼────────────────┼────────────────┤
+│  L_outer_home  │  L_pinky_home  │  L_ring_home  │  L_middle_home  │  L_index_home  │  L_inner_home  │
+├────────────────┼────────────────┼───────────────┼─────────────────┼────────────────┼────────────────┤
+│ L_outer_bottom │ L_pinky_bottom │ L_ring_bottom │ L_middle_bottom │ L_index_bottom │ L_inner_bottom │
+└────────────────┴────────────────┴───────────────┴─────────────────┴────────────────┴────────────────┘
+                                                               ┌──────────────────────┬───────────────┐
+                                                               │    L_thumb_outer     │ L_thumb_inner │
+                                                               └──────────────────────┴───────────────┘
 
-                                 |L_thum…|    |R_thum…|
-                                 |L_thum…|    |R_thum…|
+Right:
+┌────────────────┬────────────────┬─────────────────┬───────────────┬────────────────┬────────────────┐
+│  R_inner_num   │  R_index_num   │  R_middle_num   │  R_ring_num   │  R_pinky_num   │  R_outer_num   │
+├────────────────┼────────────────┼─────────────────┼───────────────┼────────────────┼────────────────┤
+│  R_inner_top   │  R_index_top   │  R_middle_top   │  R_ring_top   │  R_pinky_top   │  R_outer_top   │
+├────────────────┼────────────────┼─────────────────┼───────────────┼────────────────┼────────────────┤
+│  R_inner_home  │  R_index_home  │  R_middle_home  │  R_ring_home  │  R_pinky_home  │  R_outer_home  │
+├────────────────┼────────────────┼─────────────────┼───────────────┼────────────────┼────────────────┤
+│ R_inner_bottom │ R_index_bottom │ R_middle_bottom │ R_ring_bottom │ R_pinky_bottom │ R_outer_bottom │
+└────────────────┴────────────────┴─────────────────┴───────────────┴────────────────┴────────────────┘
+┌───────────────┬──────────────────────┐
+│ R_thumb_inner │    R_thumb_outer     │
+└───────────────┴──────────────────────┘
+
+X/Mod = tap X, hold Mod    X/Layer = tap X, hold layer
