@@ -17,7 +17,7 @@ INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 # ── Detect OS ─────────────────────────────────────────────────────────────────
 OS="$(uname -s)"
 case "$OS" in
-  Linux)  OS_TARGET="unknown-linux-musl" ;;
+  Linux)  OS_TARGET="unknown-linux-gnu" ;;
   Darwin) OS_TARGET="apple-darwin" ;;
   *)
     echo "error: unsupported OS: $OS" >&2

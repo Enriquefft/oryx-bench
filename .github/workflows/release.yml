@@ -89,25 +89,37 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ── 4. Build and upload binaries ─────────────────────────────────────────────
+  #     Linux targets are gnu (not musl): hidapi's build script requires
+  #     libudev, and static-linking libudev into a musl binary is not a
+  #     supported configuration upstream. gnu linux + libudev matches how
+  #     every distro ships hidapi-dependent tooling.
   build:
     name: Build ${{ matrix.target }}
     needs: [verify, create-release]
     strategy:
       matrix:
         include:
-          - target: x86_64-unknown-linux-musl
+          - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-          - target: aarch64-unknown-linux-musl
-            os: ubuntu-latest
+            linux: true
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+            linux: true
           - target: x86_64-apple-darwin
             os: macos-latest
+            linux: false
           - target: aarch64-apple-darwin
             os: macos-latest
+            linux: false
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install libudev (hidapi build dep, linux only)
+        if: matrix.linux
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
 
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
