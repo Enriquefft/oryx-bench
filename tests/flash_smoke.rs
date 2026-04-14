@@ -108,11 +108,17 @@ fn flash_backend_clap_rejects_unknown_variant() {
     let td = TempDir::new().unwrap();
     init_with_firmware(&td);
     oryx_bench()
-        .args(["flash", "--dry-run", "--backend", "dfu-util", "--force"])
+        .args([
+            "flash",
+            "--dry-run",
+            "--backend",
+            "not-a-backend",
+            "--force",
+        ])
         .current_dir(td.path())
         .assert()
         .failure()
-        .stderr(predicate::str::contains("dfu-util"))
+        .stderr(predicate::str::contains("not-a-backend"))
         .stderr(predicate::str::contains("keymapp"));
 }
 
