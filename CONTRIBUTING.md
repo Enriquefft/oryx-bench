@@ -65,8 +65,9 @@ Read `ARCHITECTURE.md` for the full picture. The short version:
   dependency) + SVG via subprocess to `keymap-drawer`.
 - `src/build/` — **v0.1: docker-only**. Native and Nix backends arrive
   in v0.2.
-- `src/flash/` — `wally-cli` with Keymapp instructions fallback. Never
-  invokes `dfu-util` directly.
+- `src/flash/` — subprocess handoff to ZSA's
+  [`zapp`](https://github.com/zsa/zapp) CLI (>=1.0.0, required on
+  PATH). Never invokes `dfu-util` directly.
 - `src/skill/` — embedded skill installer (project-local by default).
 - `xtask/` — separate workspace crate that calls into `oryx-bench`'s
   registries at runtime to generate the skill reference files. Replaces

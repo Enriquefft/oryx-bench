@@ -33,9 +33,7 @@
 //! Verified by reading `examples/voyager-dvorak/pulled/revision.json`
 //! and the QMK fork's `keyboards/zsa/voyager/keyboard.json`.
 
-use super::{
-    DfuParams, Geometry, GridLayout, GridRow, Hand, ThumbCluster, ThumbKey, ThumbKeyWidth,
-};
+use super::{Geometry, GridLayout, GridRow, Hand, ThumbCluster, ThumbKey, ThumbKeyWidth};
 
 pub struct Voyager;
 
@@ -114,19 +112,6 @@ impl Geometry for Voyager {
         // is the right anchor — what fails to link is "image > 64KB",
         // not "image > 60KB".
         64 * 1024
-    }
-
-    fn dfu_params(&self) -> Option<DfuParams> {
-        // Voyager bootloader enumerates as 3297:0791 (ZSA Technology
-        // Labs). Verified via `lsusb` during bootloader mode and
-        // cross-checked against the Voyager's `rules.mk`:
-        //   DFU_ARGS = -d 3297:0791 -a 0 -s 0x08002000:leave
-        Some(DfuParams {
-            vendor_id: 0x3297,
-            product_id: 0x0791,
-            alt_setting: 0,
-            start_address: 0x0800_2000,
-        })
     }
 }
 
@@ -491,18 +476,5 @@ mod tests {
         assert_eq!(Voyager.index_to_position(31), Some("R_outer_num"));
         assert_eq!(Voyager.index_to_position(50), Some("R_thumb_inner"));
         assert_eq!(Voyager.index_to_position(51), Some("R_thumb_outer"));
-    }
-
-    #[test]
-    fn dfu_params_match_voyager_rules_mk() {
-        // Pin against the Voyager's rules.mk:
-        //   DFU_ARGS = -d 3297:0791 -a 0 -s 0x08002000:leave
-        let params = Voyager.dfu_params().expect("Voyager must have DFU params");
-        assert_eq!(params.vendor_id, 0x3297);
-        assert_eq!(params.product_id, 0x0791);
-        assert_eq!(params.alt_setting, 0);
-        assert_eq!(params.start_address, 0x0800_2000);
-        assert_eq!(params.device_id(), "3297:0791");
-        assert_eq!(params.address_spec(), "0x08002000:leave");
     }
 }

@@ -15,7 +15,7 @@ Workbench for ZSA keyboard layouts — Oryx-friendly, not Oryx-required
 Usage: oryx-bench [OPTIONS] <COMMAND>
 
 Commands:
-  setup          Detect toolchain (qmk, gcc-arm, zig, docker, wally-cli, keymapp). Idempotent
+  setup          Detect toolchain (qmk, gcc-arm, zig, docker, zapp). Idempotent
   init           Create a project skeleton
   attach         Switch a local-mode project to Oryx mode
   detach         Switch an Oryx-mode project to local mode. One-way
@@ -31,6 +31,7 @@ Commands:
   diff           Semantic diff vs git ref
   upgrade-check  Re-run lint with the current keycode catalog. Use after `cargo install --force
                  oryx-bench`
+  watch          Live layer indicator over raw HID. `live` is an alias
   help           Print this message or the help of the given subcommand(s)
 
 Options:
@@ -214,11 +215,11 @@ Options:
           used by an agent — this flag only bypasses the in-process `[y/N]` prompt
 
       --backend <BACKEND>
-          Backend selection. `auto` (default) prefers wally-cli if installed and falls back to the
-          Keymapp GUI handoff
+          Backend selection. `auto` (default) uses ZSA's `zapp` CLI (https://github.com/zsa/zapp),
+          which oryx-bench requires on PATH for flashing
           
           [default: auto]
-          [possible values: auto, dfu-util, wally, keymapp]
+          [possible values: auto, zapp]
 
       --force
           Flash even if the firmware on disk doesn't match the current canonical inputs (i.e.
@@ -326,10 +327,10 @@ Options:
 
 ## `oryx-bench setup`
 
-Detect toolchain (qmk, gcc-arm, zig, docker, wally-cli, keymapp). Idempotent
+Detect toolchain (qmk, gcc-arm, zig, docker, zapp). Idempotent
 
 ```
-Detect toolchain (qmk, gcc-arm, zig, docker, wally-cli, keymapp). Idempotent
+Detect toolchain (qmk, gcc-arm, zig, docker, zapp). Idempotent
 
 Usage: setup [OPTIONS]
 
@@ -424,6 +425,49 @@ Re-run lint with the current keycode catalog. Use after `cargo install --force o
 Usage: upgrade-check
 
 Options:
+  -h, --help
+          Print help
+
+```
+
+---
+
+## `oryx-bench watch`
+
+Live layer indicator over raw HID. `live` is an alias
+
+```
+Live layer indicator over raw HID. `live` is an alias
+
+Usage: watch [OPTIONS]
+
+Options:
+      --once
+          One poll, print status, exit. Scriptable; never opens a window
+
+      --layer-only
+          Stream layer changes to stdout, one line per change. Scriptable; never opens a window.
+          Runs until Ctrl-C
+
+      --set-layer <N>
+          Lock the keyboard to layer N, confirm via a LAYER event, exit. Scriptable; never opens a
+          window
+
+      --reset-layers
+          Release every host-driven layer lock (one UnsetLayer per layer known to the project
+          layout; falls back to the full `0..=15` range when no project is reachable). Exits
+          immediately after the last write. Useful when a prior session left the keyboard stuck on a
+          lock
+
+      --device <SERIAL_OR_PATH>
+          Select a specific keyboard by serial number or HID device node path (e.g. `/dev/hidraw3`).
+          Defaults to the first matching ZSA raw-HID device
+
+      --timeout-ms <TIMEOUT_MS>
+          Per-operation timeout (handshake reads). Milliseconds
+          
+          [default: 2000]
+
   -h, --help
           Print help
 

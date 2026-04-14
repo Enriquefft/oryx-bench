@@ -26,7 +26,7 @@ pub struct Args {
 
 pub fn run(args: Args, project_override: Option<PathBuf>) -> Result<ExitCode> {
     let project = Project::discover(project_override.as_deref())?;
-    let layout = super::show::load_layout_for_explain(&project)?;
+    let layout = project.canonical_layout()?;
 
     let query = args.query.trim();
     if let Some(name) = query.strip_prefix("layer:") {

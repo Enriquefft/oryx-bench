@@ -44,7 +44,7 @@ pub enum ColorChoice {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Detect toolchain (qmk, gcc-arm, zig, docker, wally-cli, keymapp). Idempotent.
+    /// Detect toolchain (qmk, gcc-arm, zig, docker, zapp). Idempotent.
     Setup(commands::setup::Args),
     /// Create a project skeleton.
     Init(commands::init::Args),
@@ -74,6 +74,9 @@ pub enum Command {
     Diff(commands::diff::Args),
     /// Re-run lint with the current keycode catalog. Use after `cargo install --force oryx-bench`.
     UpgradeCheck(commands::upgrade_check::Args),
+    /// Live layer indicator over raw HID. `live` is an alias.
+    #[command(alias = "live")]
+    Watch(commands::watch::Args),
 }
 
 /// Entry point invoked from `main.rs`.
@@ -100,6 +103,7 @@ fn dispatch(cli: Cli) -> Result<ExitCode> {
         Command::Skill(args) => commands::skill::run(args, project_override),
         Command::Diff(args) => commands::diff::run(args, project_override),
         Command::UpgradeCheck(args) => commands::upgrade_check::run(args, project_override),
+        Command::Watch(args) => commands::watch::run(args, project_override),
     }
 }
 

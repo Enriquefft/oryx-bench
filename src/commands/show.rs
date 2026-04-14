@@ -9,7 +9,6 @@ use clap::Parser;
 use crate::config::Project;
 use crate::pull;
 use crate::render;
-use crate::schema::canonical::CanonicalLayout;
 
 #[derive(Parser, Debug)]
 pub struct Args {
@@ -40,7 +39,9 @@ pub fn run(args: Args, project_override: Option<PathBuf>) -> Result<ExitCode> {
         }
     }
 
-    let layout = load_layout(&project).context("loading canonical layout")?;
+    let layout = project
+        .canonical_layout()
+        .context("loading canonical layout")?;
     let geometry = project.cfg.layout.geometry.as_str();
     let geom = crate::schema::geometry::get(geometry)
         .with_context(|| format!("unknown geometry '{geometry}'"))?;
@@ -77,27 +78,4 @@ pub fn run(args: Args, project_override: Option<PathBuf>) -> Result<ExitCode> {
         }
     }
     Ok(ExitCode::from(0))
-}
-
-pub(crate) fn load_layout_for_explain(project: &Project) -> Result<CanonicalLayout> {
-    load_layout(project)
-}
-
-fn load_layout(project: &Project) -> Result<CanonicalLayout> {
-    if project.is_oryx_mode() {
-        let path = project.pulled_revision_path();
-        let raw = std::fs::read_to_string(&path)
-            .with_context(|| format!("reading {}: run `oryx-bench pull` first", path.display()))?;
-        let oryx: crate::schema::oryx::Layout =
-            serde_json::from_str(&raw).with_context(|| format!("parsing {}", path.display()))?;
-        CanonicalLayout::from_oryx(&oryx)
-    } else if let Some(path) = project.local_layout_path() {
-        let raw = std::fs::read_to_string(&path)
-            .with_context(|| format!("reading {}", path.display()))?;
-        let local: crate::schema::layout::LayoutFile =
-            toml::from_str(&raw).with_context(|| format!("parsing {}", path.display()))?;
-        CanonicalLayout::from_local(&local)
-    } else {
-        anyhow::bail!("kb.toml has neither [layout] hash_id nor [layout.local] file");
-    }
 }

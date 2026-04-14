@@ -30,3 +30,4 @@ pub mod render;
 pub mod schema;
 pub mod skill;
 pub mod util;
+pub mod watch;

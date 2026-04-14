@@ -96,7 +96,10 @@ pub fn render_layer(
 // Produces readable labels: `ENT/Alt` instead of `LA:ENT`,
 // `BSPC/Sym+Num` instead of `1:BSPC`, `,` instead of `COMM`.
 
-fn friendly_key(key: &CanonicalKey, layers: &[CanonicalLayer]) -> String {
+/// Human-friendly label for a single canonical key. Shared by the
+/// ASCII split-grid renderer and the `oryx-bench watch` GUI so both
+/// surfaces stay label-identical.
+pub(crate) fn friendly_key(key: &CanonicalKey, layers: &[CanonicalLayer]) -> String {
     match (&key.tap, &key.hold) {
         (Some(CanonicalAction::Lt { layer, tap }), _) => {
             let t = friendly_action(tap, layers);

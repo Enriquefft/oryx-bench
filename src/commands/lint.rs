@@ -73,7 +73,7 @@ pub fn run(args: Args, project_override: Option<PathBuf>) -> Result<ExitCode> {
         }
     }
 
-    let layout = super::show::load_layout_for_explain(&project)?;
+    let layout = project.canonical_layout()?;
     let mut issues = lint::run_all(&layout, &project)?;
 
     if let Some(rule) = &args.rule {

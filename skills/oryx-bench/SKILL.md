@@ -284,6 +284,11 @@ oryx-bench status                 One-screen overview — RUN THIS FIRST in any 
 oryx-bench build [--dry-run]      Compile firmware. Cached. Fast on no-op.
 oryx-bench diff [REF]             Semantic diff vs git ref. Show user before flashing.
 oryx-bench flash [--dry-run] [--yes] [--force]   Flash to keyboard. REQUIRES USER APPROVAL. --force bypasses the build-freshness check.
+oryx-bench watch                  Live layer indicator window (raw HID; no Keymapp daemon needed). `live` is an alias.
+oryx-bench watch --once           One-shot print of current layer + keyboard. Exit 2 if no ZSA keyboard is connected. Scriptable.
+oryx-bench watch --layer-only     Stream layer changes to stdout. Scriptable. Ctrl-C to exit.
+oryx-bench watch --set-layer N    Force the keyboard onto layer N via the Oryx HID override. One-shot.
+oryx-bench watch --reset-layers   Release every host-driven layer lock. One-shot. Idempotent.
 oryx-bench upgrade-check          Re-run lint after `cargo install --force oryx-bench`. Surfaces uncatalogued keycodes.
 oryx-bench skill install          Already done if you're reading this.
 ```

@@ -206,11 +206,16 @@ See SKILL.md → "Build-failure iteration" section. Two-attempt rule.
 
 ### "Flash didn't work"
 
-1. Check `oryx-bench setup` — is `wally-cli` available? Is `keymapp`?
+1. Check `oryx-bench setup` — is `zapp` available? `oryx-bench flash`
+   fails loudly with an install hint when `zapp` is missing or older
+   than v1.0.0.
 2. Did the user put the keyboard in bootloader mode? (Press the reset
-   button, or use `QK_BOOT` if bound)
-3. Did `oryx-bench flash` print "use Keymapp GUI" instructions because
-   `wally-cli` wasn't available? If so, walk through the GUI steps.
+   button, or use `QK_BOOT` if bound.) `zapp` prints its own
+   "Waiting for keyboard in bootloader mode…" message — if the user
+   sees that indefinitely, they still need to reset the board.
+3. Permissions on Linux: `zapp` ships `udev/50-zsa.rules` upstream.
+   If writes fail with "Cannot open DFU device," point the user at
+   <https://github.com/zsa/zapp#linux-udev-rules>.
 
 ## Mode switching playbooks
 

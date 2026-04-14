@@ -70,6 +70,20 @@ in
       description = "The oryx-bench package to use";
     };
 
+    zappPackage = mkOption {
+      type = types.nullOr types.package;
+      default = null;
+      defaultText = "null — set from the flake so `zapp` lands on PATH";
+      description = ''
+        The `zapp` package to install alongside oryx-bench. `oryx-bench
+        flash` shells out to `zapp`, so the CLI is a hard runtime
+        dependency. The oryx-bench flake exposes a derivation at
+        `packages.''${system}.zapp` — pass it here to ship a matched
+        pair. Set to `null` to skip (e.g. if you install zapp some
+        other way).
+      '';
+    };
+
     keyboards = mkOption {
       type = types.attrsOf (types.submodule {
         options = {
@@ -116,6 +130,23 @@ in
 
   config = mkIf cfg.enable {
 
+    # `oryx-bench watch` speaks the Oryx WebHID protocol directly to
+    # the keyboard over `/dev/hidraw*`. That interface is root-only by
+    # default on Linux; the user needs the ZSA udev rules to reach it.
+    #
+    # Nixpkgs already ships `hardware.keyboard.zsa` (see
+    # `nixos/modules/hardware/keyboard/zsa.nix`) which vendors the
+    # maintained `zsa-udev-rules` package — the same `zsa/wally`-
+    # derived ruleset we seed at `packaging/linux/50-zsa.rules` for
+    # non-NixOS distros. Enabling the upstream option is the single-
+    # source-of-truth path; re-vendoring the rule file into the Nix
+    # store would duplicate state.
+    #
+    # `mkDefault` (not `mkForce`) so users who manage ZSA udev rules
+    # themselves can opt out with
+    # `hardware.keyboard.zsa.enable = false;`.
+    hardware.keyboard.zsa.enable = lib.mkDefault true;
+
     # Build all enabled keyboard layouts and expose them
     system.extraSystemBuilderCmds =
       let
@@ -131,11 +162,15 @@ in
         )}
       '';
 
-    # Optionally generate flash scripts
+    # `zapp` is a hard runtime dep of `oryx-bench flash`; ship it in
+    # the same closure as the CLI so `nixos-rebuild switch` is
+    # sufficient to get both binaries on PATH. `zappPackage = null`
+    # opts out for users installing zapp through another channel.
     environment.systemPackages =
-      if cfg.enableFlashScripts then
-        [ cfg.package ] ++ [
-          (pkgs.runCommandLocal "oryx-bench-flash-scripts" { } ''
+      let
+        core = [ cfg.package ] ++ optional (cfg.zappPackage != null) cfg.zappPackage;
+        scripts = optional cfg.enableFlashScripts (
+          pkgs.runCommandLocal "oryx-bench-flash-scripts" { } ''
             mkdir -p $out/bin
             ${concatStringsSep "\n" (
               mapAttrsToList (name: layout:
@@ -144,10 +179,10 @@ in
                 else ""
               ) cfg.keyboards
             )}
-          '')
-        ]
-      else
-        [ cfg.package ];
+          ''
+        );
+      in
+      core ++ scripts;
   };
 
   meta.maintainers = [ ];

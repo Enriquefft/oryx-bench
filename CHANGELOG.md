@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Pre-1.0: minor versions may contain breaking changes.
 
+## [Unreleased]
+
+### Changed — flash pipeline delegates to ZSA's `zapp`
+
+`oryx-bench flash` now shells out to the official
+[`zapp`](https://github.com/zsa/zapp) CLI (>=1.0.0, required on PATH)
+instead of invoking `wally-cli`, `dfu-util`, or the Keymapp GUI
+handoff directly. `zapp` owns the USB DFU and HALFKAY protocols
+natively via libusb and supports every ZSA board, so a single handoff
+replaces three in-tree backends.
+
+This resolves `docs/v0.2-flash-issues.md` items #1–#4 (wally-cli
+Voyager incompatibility, DFU suffix byte-order bug, board-unaware
+backend detection, undocumented udev rules) and reaffirms the
+`ARCHITECTURE.md` non-goal that oryx-bench never invokes `dfu-util`
+directly.
+
+**Breaking (surfaces):**
+- `--backend` values collapse from `{auto, dfu-util, wally, keymapp}`
+  to `{auto, zapp}`. Existing scripts using `--backend wally` or
+  `--backend keymapp` must drop the flag (or pass `--backend zapp`).
+- `Geometry::dfu_params()`, the `DfuParams` struct, and the
+  `STM32_DFU_VENDOR` constant are removed — DFU parameters live in
+  `zapp` now (single source of truth for flash protocols).
+- `oryx-bench setup` reports `zapp` in place of `wally-cli`. Keymapp
+  is intentionally not detected by `setup` / `status` — it is not
+  required by any `oryx-bench` command (users who want Keymapp as a
+  GUI or recovery path install it separately).
+
+**Code:**
+- `src/flash/zapp.rs` — new backend; checks `zapp --version >= 1.0.0`
+  before invoking `zapp flash <firmware.bin>` with inherited stdio.
+- `src/flash/mod.rs` — single `Backend::Zapp`, single `detect_backend`
+  surface, stripped board-aware branching.
+- `src/flash/{wally,dfu_util,keymapp}.rs` — removed.
+- `src/schema/geometry/{mod,voyager}.rs` — removed DFU params.
+- `src/commands/flash.rs` — `--dry-run` no longer requires `zapp` on
+  PATH (describes the plan even on hosts without the flasher
+  installed; hardware flash still checks).
+- `src/generate/rules_mk.rs` — still disables `DFU_SUFFIX_ARGS`
+  (comment updated: suffix is dead weight under zapp, and disabling
+  it drops a host-side build dep).
+
+**Docs:** `README.md`, `ARCHITECTURE.md`, `docs/v0.2-flash-issues.md`,
+`skills/oryx-bench/reference/{workflows,command-reference}.md`, and
+`packaging/nix/README.md` updated to reference `zapp` as the flash
+surface. `cargo xtask gen-skill-docs` regenerated.
+
 ## [0.1.0] - 2026-04-13
 
 ### Fixed (production-blocker: live Oryx GraphQL `combos` schema mismatch — task #66)

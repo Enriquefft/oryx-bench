@@ -37,8 +37,9 @@ pub struct Args {
     /// bypasses the in-process `[y/N]` prompt.
     #[arg(long)]
     pub yes: bool,
-    /// Backend selection. `auto` (default) prefers wally-cli if installed
-    /// and falls back to the Keymapp GUI handoff.
+    /// Backend selection. `auto` (default) uses ZSA's `zapp` CLI
+    /// (https://github.com/zsa/zapp), which oryx-bench requires on PATH
+    /// for flashing.
     #[arg(long, value_enum, default_value_t = flash::BackendChoice::Auto)]
     pub backend: flash::BackendChoice,
     /// Flash even if the firmware on disk doesn't match the current
@@ -59,14 +60,21 @@ pub fn run(args: Args, project_override: Option<PathBuf>) -> Result<ExitCode> {
     }
 
     let geom = project_geometry(&project)?;
-    let backend = flash::detect_backend(args.backend, geom)?;
-    let plan = flash::plan(&firmware_path, backend, geom)?;
 
+    // Dry-run describes what flash would do; it must not require the
+    // backend tool to be installed on the host. A user running
+    // --dry-run to preview firmware metadata shouldn't be blocked by
+    // a missing `zapp` binary. Backend detection is deferred to the
+    // real-flash path below.
     if args.dry_run {
+        let plan = flash::plan(&firmware_path, flash::Backend::Zapp, geom)?;
         println!("Would flash:");
         println!("{}", flash::render_plan(&plan));
         return Ok(ExitCode::from(0));
     }
+
+    let backend = flash::detect_backend(args.backend)?;
+    let plan = flash::plan(&firmware_path, backend, geom)?;
 
     println!("About to flash:");
     println!("{}", flash::render_plan(&plan));
@@ -94,7 +102,7 @@ fn check_firmware_is_fresh(project: &Project) -> Result<()> {
         )
     })?;
 
-    let layout = super::show::load_layout_for_explain(project)?;
+    let layout = project.canonical_layout()?;
     let features = FeaturesToml::load_or_default(&project.overlay_features_path())?;
     // Both call sites of "look up the geometry from the project"
     // route through this single helper. Previously this site

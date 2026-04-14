@@ -54,8 +54,13 @@ around two ideas:
 - Replacing Oryx's visual editor.
 - Pushing local layout changes back to Oryx (no public write API; not worth
   the fragility).
-- Live keyboard editing à la Vial. (Out of scope; integrate with
-  `kontroll` instead of replacing it.)
+- Live keyboard editing à la Vial. (Out of scope. Runtime state — active
+  layer, battery, RGB — plus runtime *overrides* (host-driven layer locks,
+  RGB effects, status LEDs) are in scope via `oryx-bench watch`, which
+  talks to the keyboard directly over raw HID (QMK usage page `0xFF60`,
+  usage `0x61`) using ZSA's "Oryx WebHID" protocol — the same wire format
+  Keymapp uses. No daemon, no "enable API in Settings" step; plug the
+  keyboard in and it works. See `src/watch/hid.rs` for the wire format.)
 - Supporting non-ZSA keyboards. The QMK ecosystem is huge; we are scoped to
   ZSA boards because Oryx is ZSA-specific and our value-add is the Oryx
   integration.
@@ -401,15 +406,14 @@ oryx-bench/
 │   │   └── docker.rs                  # bundled image at ghcr.io/enriquefft/oryx-bench-qmk
 │   ├── flash/
 │   │   ├── mod.rs                     # detect + dispatch + --dry-run + --yes
-│   │   ├── wally.rs                   # wally-cli wrapper (if available)
-│   │   └── keymapp.rs                 # GUI handoff (writes .bin to known cache, prints instructions)
+│   │   └── zapp.rs                    # delegate to ZSA's `zapp` CLI (required on PATH)
 │   ├── skill/
 │   │   ├── mod.rs                     # install/remove logic, project-local default
 │   │   └── embedded.rs                # include_str! of the SKILL.md tree
 │   └── util/
 │       ├── mod.rs
 │       ├── git.rs                     # shells out to `git` (no git2 dep)
-│       ├── toolchain.rs               # which() detection of qmk, gcc-arm, zig, docker, wally-cli, keymapp
+│       ├── toolchain.rs               # which() detection of qmk, gcc-arm, zig, docker, zapp (keymapp is intentionally NOT detected — not required by any oryx-bench command path)
 │       ├── fs.rs                      # atomic write, project root discovery
 │       └── http.rs
 ├── xtask/                             # cargo xtask for codegen of skill reference files
@@ -986,14 +990,22 @@ ghcr.io/enriquefft/oryx-bench-qmk:<release-tag>
 Image size target: ≤ 1GB compressed. Pulled once on first build, cached
 forever in the local Docker store.
 
+- Generated firmware always carries the Oryx HID handler (`RAW_ENABLE = yes`, `RGB_MATRIX_ENABLE = yes`, `COMMUNITY_MODULES += oryx`) so `oryx-bench watch` works out of the box against our own output. The three flags are owned by `src/generate/rules_mk.rs::WATCH_REQUIRED_RULES_MK` (SSOT) and emitted unconditionally; a user setting `rgb_matrix = false` in `features.toml` is rejected at codegen time because it would silently break `watch`.
+
 ### `src/flash/` — flashing
 
-Two backends, with detection and fallback:
+Single backend: ZSA's official [`zapp`](https://github.com/zsa/zapp)
+CLI (v1.0.0+, required on PATH). `oryx-bench flash` stages the
+firmware, verifies build freshness, asks for user approval, and
+execs `zapp flash <path>` with inherited stdio so zapp's own progress
+bar drives the flash.
 
-1. **`wally-cli`** if on PATH — invoked directly
-2. **Keymapp GUI handoff** as fallback — copies the `.bin` to
-   `~/.cache/oryx-bench/firmware.bin` and prints platform-specific
-   instructions for how to open Keymapp's flasher and select that file
+**Why delegate rather than reimplement.** `zapp` owns the USB DFU and
+HALFKAY protocols natively via libusb, speaks every supported ZSA
+board (Voyager/Moonlander/Ergodox/Halfmoon/Planck), and ships the
+udev rules in one place. Owning a second implementation would
+duplicate the critical path and drift from upstream — it keeps the
+"single source of truth" bar while honoring the non-goal below.
 
 We **never** invoke `dfu-util`. The Voyager's flashing protocol is
 custom and bricking risk is real.
@@ -1399,7 +1411,7 @@ About to flash:
   size:      54918 bytes
   sha256:    7b3a1e...
   target:    ZSA Voyager (vendor 0x3297)
-  via:       wally-cli
+  via:       zapp
 
 Continue? [y/N]
 ```
@@ -1474,9 +1486,161 @@ Each is a hard data point that the design rests on.
 
 **Verified:** A `.c` file dropped in a keymap dir with one `SRC += foo.c` line in `rules.mk` is picked up by the build, linked into the firmware, and the symbol is reachable from `keymap.c` via `extern`. Tested with a no-op marker function; verified in the linked ELF symbol table.
 
-### V3: kontroll runs
+### V3: Raw HID is the runtime SSOT
 
-**Verified:** `nix run nixpkgs#kontroll list` runs cleanly, reports the API socket path it expects (`~/.config/.keymapp/keymapp.sock`), and exits 0 when the socket is missing. **Confirmed kontroll has no `flash` subcommand** — it's runtime-only (set-layer, set-rgb, etc.). For flashing we use `wally-cli` or Keymapp GUI.
+**Verified.** This is the load-bearing verification for `oryx-bench
+watch`. The section below is the canonical reference for the feature.
+
+**What `oryx-bench watch` talks to.**
+The ZSA keyboard directly, over the kernel's `/dev/hidraw*` node. No
+daemon, no socket, no "enable API in Settings" checkbox, no GUI app
+running in the background. The binary enumerates HID devices, finds
+the one speaking the Oryx WebHID interface, and opens it. ZSA's
+Keymapp GUI is not involved and is not required; it is a sibling
+client of the same on-device protocol, not a prerequisite.
+
+**Wire format.**
+Every packet is 32 bytes, both directions. `bytes[0]` is the
+command/event id; the rest is the payload, padded with `0xFE` (stop
+byte) to fill the report. The transport is QMK's "raw HID" channel,
+identified by usage page `0xFF60` / usage `0x61` inside the
+keyboard's composite HID descriptor. Matching on usage page (not
+interface number) is correct because composite descriptors put the
+raw interface at different indices on different boards / firmware
+builds. Fully-padded all-`0xFE` packets serve a dual role: they
+carry the `GET_PROTOCOL_VERSION` command on host→device, which is
+why `GET_PROTOCOL_VERSION` itself is `0xFE`.
+
+**Where the protocol lives (SSOT).**
+The byte-level contract is the canonical on-disk definition, in the
+module docs of [`src/watch/hid.rs`](src/watch/hid.rs). Every command
+id, event id, payload offset, and padding rule is documented
+alongside the Rust enum that encodes it. We intentionally do **not**
+vendor a `.proto` or `.h` file: the wire format is small enough to
+express directly in typed Rust, and duplicating it as a second
+artifact would create a drift hazard. The upstream reference
+implementation lives in ZSA's `zsa/qmk_modules` repository,
+specifically `modules/zsa/oryx/oryx.h` and `oryx.c`; the
+byte-for-byte contract in `hid.rs` was derived from those files and
+cross-checked against the `zsa/qmk_firmware` fork that ships on ZSA
+boards. When the upstream module is next audited for drift, pin a
+commit SHA at the top of `hid.rs`; until then, the contract in
+`hid.rs` is itself the SSOT.
+
+**Firmware requirements.**
+The keyboard must be built with three QMK flags for the watch
+feature to work end-to-end:
+
+```mk
+RAW_ENABLE = yes             # exposes usage page 0xFF60 / usage 0x61
+COMMUNITY_MODULES += oryx    # adds the Oryx WebHID handler
+RGB_MATRIX_ENABLE = yes      # required by the RGB command surface
+```
+
+Stock ZSA firmware (anything built by Oryx / shipped on a new
+Voyager / Moonlander) already enables all three. Custom QMK builds
+that drop any of them will either enumerate without the raw
+interface (RAW_ENABLE off) or return an error on the first packet
+(community module missing) — the client surfaces both states as a
+specific, actionable error.
+
+**How `watch` and `flash` coexist without duplicating transports.**
+The keyboard exposes different USB device states depending on mode:
+
+- **Runtime HID-bound state** (normal use): the kernel claims the
+  composite HID descriptor; `/dev/hidraw*` appears. `watch` uses
+  this state, via `hidapi` with the `linux-static-hidraw` feature
+  (no libusb subprocess).
+- **DFU bootloader state** (during a flash): the board re-
+  enumerates with a DFU class descriptor on VID `0x3297` / PID
+  `0x0791`. No HID endpoint exists in this state. `flash` delegates
+  to ZSA's `zapp`, which speaks DFU / HALFKAY natively via `nusb`.
+
+Different device states → different transports. `hidapi` and
+`nusb` are not redundant; each is the correct library for one half
+of the device lifecycle. `oryx-bench watch` cannot see a board
+that is currently in DFU mode; `zapp` cannot see a board that is
+HID-bound. That is a feature of the hardware protocol, not a gap
+in our tooling.
+
+**Protocol versioning and drift handling.**
+The current supported version is `0x04`, negotiated via
+`GET_PROTOCOL_VERSION` on every connect. On drift:
+
+- **Older (< 0x04):** warn, continue. Known lost: the subset of
+  commands introduced between the firmware's version and ours. The
+  user can update their firmware via Oryx / `oryx-bench flash`.
+- **Newer (> 0x04):** hard-fail with an error telling the user to
+  upgrade `oryx-bench`. Silently speaking an older dialect to a
+  newer firmware would risk misrouting writes (a newer firmware
+  could redefine command ids we think we know).
+
+The constant `PROTOCOL_VERSION` in `hid.rs` is the single knob
+that gets bumped on an audit.
+
+**How writes work.**
+`oryx-bench watch` exposes writes through a typed `Command` enum
+(see [`src/watch/hid.rs`](src/watch/hid.rs)). Every call site:
+
+1. Sends a `Command` through the `CommandSender` mpsc channel.
+2. The blocking pump drains queued commands between HID reads —
+   this is how we avoid racing the `hidapi` read handle, which is
+   not `Sync`.
+3. Each command is encoded to its exact 32-byte report by
+   `encode_command()` (byte-level unit-tested).
+4. Device state mutation remains authoritative: the UI observes the
+   firmware's resulting `LAYER` event rather than optimistically
+   mutating local state.
+
+Host-side **sustain** for RGB and status-LED overrides is
+implemented in the pump: a non-zero `sustain` spawns a timer task
+that enqueues the matching `RgbControl(false)` / `StatusLedControl
+(false)` release command when it fires, and a newer sustained
+command cancels the prior timer (newer call wins). The firmware
+itself holds overrides indefinitely — the timer is purely a host
+convenience so UX can say "flash red for 500ms" without the caller
+manually scheduling the release.
+
+**Operations exposed.**
+
+Read (device → host events the watch loop dispatches):
+
+- `LAYER(n)` — active layer changed.
+- `GET_FW_VERSION` response — firmware version string.
+- `GET_PROTOCOL_VERSION` response — protocol version byte.
+- Product name / VID / PID read from the HID device descriptor.
+- `KEYDOWN` / `KEYUP` — position events (available; not yet
+  surfaced by UI).
+- `ERROR(code)` — firmware-reported protocol error.
+
+Write (host → device commands the `Command` enum exposes):
+
+- `SetLayer(n)` — lock layer `n` on.
+- `UnsetLayer(n)` — release a prior `SetLayer` lock.
+- `SetRgbLed { led, r, g, b, sustain }` — single LED override.
+- `SetRgbAll { r, g, b, sustain }` — all LEDs override.
+- `SetStatusLed { led, on, sustain }` — single status LED.
+- `SetStatusLedControl(bool)` — hand status-LED ownership
+  between host and firmware.
+- `SetRgbControl(bool)` — hand RGB ownership between host and
+  firmware.
+- `IncreaseBrightness` / `DecreaseBrightness` — one step at a
+  time; the firmware owns the absolute level.
+
+**Explicit non-goals for this feature.**
+
+- **No reverse-engineering of Keymapp proprietary features.** We
+  speak the *published* Oryx WebHID protocol from
+  `zsa/qmk_modules`; anything Keymapp does outside that protocol
+  (e.g. its local sqlite cache, its private GUI state) is out of
+  scope and stays out of scope.
+- **No bricking-risk operations.** `watch` is strictly a runtime
+  protocol. It cannot write firmware, cannot rewrite keymaps, and
+  cannot persist state across reboots. Every override released on
+  disconnect.
+- **No firmware flashing.** `oryx-bench flash` is the dedicated
+  surface for that, and it delegates to `zapp`. `watch` and
+  `flash` do not share a transport and will never merge.
 
 ### V4: Oryx GraphQL is unauthenticated and live
 
@@ -1524,7 +1688,7 @@ This is the load-bearing verification for the Tier 2 design.
 - Single static binary for distribution to non-Python users
 - `cargo dist` automates per-platform GitHub releases
 - `serde` makes the Oryx JSON parsing self-documenting and type-checked
-- `kontroll` is Rust — ZSA ecosystem alignment for any future integrations
+- ZSA's "Oryx WebHID" raw-HID protocol is public (in `zsa/qmk_modules`) and implemented in-tree via `hidapi` — first-party, no daemon, no wrapper-crate drift
 - Sub-10ms startup matters for a CLI Claude Code invokes tens of times
   per session
 - `include_str!` lets the binary ship the skill files atomically
@@ -1572,7 +1736,7 @@ not Oryx-required.**
 | ZSA changes the GraphQL schema | Pin a query version; integration test runs on every release; failure mode is "pull fails loudly", not silent corruption |
 | ZSA's `qmk_firmware` fork moves | Pin commit SHA in the docker image; bump explicitly per release |
 | Generator misses a rare keycode | `Keycode::Other(String)` catch-all preserves the literal; lint surfaces for review; codegen still works |
-| `wally-cli` is deprecated and may eventually break | Fallback path is "copy `.bin` and tell user to use Keymapp GUI" — always works |
+| `zapp` changes CLI contract | Pin a minimum version (`>=1.0.0`); `ensure_available()` fails loudly with an install hint; we delegate rather than reimplement, so zapp bugs stay in zapp |
 | Big initial docker pull (~1GB) | Cached forever after first pull; `setup` warns about size before first build |
 | Zig 0.x breaking changes | Pin Zig version per release; bump deliberately; no SemVer guarantees while Zig is pre-1.0 |
 | Oryx is down | Pull fails; local-mode users unaffected; Oryx-mode users can `oryx-bench detach` to switch to local mode if outage is long |
@@ -1587,7 +1751,7 @@ Explicitly cut from v0.1 to ship faster:
 
 - **Native and Nix build backends.** Docker is the v0.1 path. Native and
   Nix come back in v0.2 once we have docker stable.
-- **`oryx-bench live`** (kontroll integration for runtime layer state).
+- **`oryx-bench watch`** (live layer-state indicator; talks to the keyboard directly over raw HID using ZSA's "Oryx WebHID" protocol — no daemon, no Keymapp dependency. `live` is kept as a hidden alias).
 - **Moonlander and Ergodox geometries.** Voyager only in v0.1. Adding
   geometries is per-keyboard work (a single file in `src/schema/geometry/`
   + a fixture + tests) and is documented in `CONTRIBUTING.md`.
@@ -1603,7 +1767,7 @@ What ships in v0.1.0:
   lint, status, skill install/remove, auto-pull cache
 - Write-side: attach, detach, build (docker only), all generators
   (keymap, features.c, features.h, config.h, rules.mk)
-- Hardware: flash (wally + Keymapp fallback), --dry-run, --yes,
+- Hardware: flash (delegates to ZSA's `zapp` CLI), --dry-run, --yes,
   --force; build-freshness check refuses stale flashes
 - Polish: diff (semantic vs git ref), upgrade-check, 21 lint rules
 

@@ -82,7 +82,7 @@ pub fn run(args: Args, project_override: Option<PathBuf>) -> Result<ExitCode> {
     println!();
 
     println!("Lint:");
-    match super::show::load_layout_for_explain(&project) {
+    match project.canonical_layout() {
         Ok(layout) => match lint::run_all(&layout, &project) {
             Ok(issues) => {
                 let errors = issues

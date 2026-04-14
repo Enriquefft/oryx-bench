@@ -46,7 +46,7 @@ pub fn run(args: Args, project_override: Option<PathBuf>) -> Result<ExitCode> {
         }
     }
 
-    let layout = super::show::load_layout_for_explain(&project)?;
+    let layout = project.canonical_layout()?;
     let geom = geometry::get(project.cfg.layout.geometry.as_str())
         .with_context(|| format!("unknown geometry '{}'", project.cfg.layout.geometry))?;
     let features = FeaturesToml::load_or_default(&project.overlay_features_path())?;

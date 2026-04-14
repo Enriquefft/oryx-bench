@@ -1,0 +1,35 @@
+# oryx-bench — ZSA keyboard udev rules
+#
+# Grants the logged-in user access to the raw-HID interface
+# `oryx-bench watch` uses (and, as a bonus, to the DFU interfaces
+# `oryx-bench flash` uses). Source: derived from `zsa/wally`'s
+# dist/linux64/50-*.rules (MIT), rewritten to use `TAG+="uaccess"`
+# (modern systemd) instead of world-writable `MODE:="0666"`.
+#
+# Install:
+#   sudo cp packaging/linux/50-zsa.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload
+#   sudo udevadm trigger
+#
+# NixOS users: set `hardware.keyboard.zsa.enable = true;` instead.
+# That enables nixpkgs' upstream `zsa-udev-rules` package, which
+# vendors the same content from `zsa/wally` and is pinned by the
+# channel.
+
+# ── Runtime raw-HID (oryx-bench watch, Oryx WebHID, live training) ──
+# ZSA VID 0x3297 covers Voyager + Moonlander + ErgoDox EZ (STM32).
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="3297", TAG+="uaccess"
+# Teensy VID 0x16c0 covers the original m32u4 ErgoDox EZ.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="16c0", TAG+="uaccess"
+
+# ── ErgoDox EZ (Teensy 2.0) DFU + ModemManager/MTP quiet-down ──
+ATTRS{idVendor}=="16c0", ATTRS{idProduct}=="04[789B]?", ENV{ID_MM_DEVICE_IGNORE}="1"
+ATTRS{idVendor}=="16c0", ATTRS{idProduct}=="04[789A]?", ENV{MTP_NO_PROBE}="1"
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="16c0", ATTRS{idProduct}=="04[789ABCD]?", TAG+="uaccess"
+KERNEL=="ttyACM*", ATTRS{idVendor}=="16c0", ATTRS{idProduct}=="04[789B]?", TAG+="uaccess"
+
+# ── Moonlander / Planck EZ (STM32 DFU bootloader) ──
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="df11", TAG+="uaccess", SYMLINK+="stm32_dfu"
+
+# ── Voyager (Ignition DFU bootloader) ──
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="3297", TAG+="uaccess", SYMLINK+="ignition_dfu"

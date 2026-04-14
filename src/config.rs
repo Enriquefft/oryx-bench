@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use crate::error::ProjectError;
+use crate::schema::canonical::CanonicalLayout;
 use crate::schema::kb_toml::KbToml;
 
 #[derive(Debug, Clone)]
@@ -98,6 +99,29 @@ impl Project {
 
     pub fn is_local_mode(&self) -> bool {
         self.cfg.layout.local.is_some()
+    }
+
+    /// Load and parse the project's canonical layout from whichever
+    /// source kb.toml selects (Oryx-pulled JSON or a local TOML file).
+    /// Single source of truth for every command that needs the layout.
+    pub fn canonical_layout(&self) -> Result<CanonicalLayout> {
+        if self.is_oryx_mode() {
+            let path = self.pulled_revision_path();
+            let raw = std::fs::read_to_string(&path).with_context(|| {
+                format!("reading {}: run `oryx-bench pull` first", path.display())
+            })?;
+            let oryx: crate::schema::oryx::Layout = serde_json::from_str(&raw)
+                .with_context(|| format!("parsing {}", path.display()))?;
+            CanonicalLayout::from_oryx(&oryx)
+        } else if let Some(path) = self.local_layout_path() {
+            let raw = std::fs::read_to_string(&path)
+                .with_context(|| format!("reading {}", path.display()))?;
+            let local: crate::schema::layout::LayoutFile =
+                toml::from_str(&raw).with_context(|| format!("parsing {}", path.display()))?;
+            CanonicalLayout::from_local(&local)
+        } else {
+            anyhow::bail!("kb.toml has neither [layout] hash_id nor [layout.local] file")
+        }
     }
 }
 

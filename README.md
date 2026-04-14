@@ -4,10 +4,11 @@
 > at all), modern declarative config + Zig for advanced features, one-command
 > deterministic builds, designed to be driven by humans **and** by Claude Code.
 
-> **Status: v0.1.0.** Voyager support, Docker build backend, wally-cli +
-> Keymapp flash, full lint suite. Moonlander/Ergodox geometries and
-> native+nix build backends are tracked for a future release. The full
-> design spec is in [`ARCHITECTURE.md`](ARCHITECTURE.md).
+> **Status: v0.1.0.** Voyager support, Docker build backend, flashing
+> delegated to ZSA's [`zapp`](https://github.com/zsa/zapp), full lint
+> suite. Moonlander/Ergodox geometries and native+nix build backends
+> are tracked for a future release. The full design spec is in
+> [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## What it does
 
@@ -79,8 +80,8 @@ the pieces compose.
 | Persona | What they do | Sync friction |
 |---|---|---|
 | **Oryx-only purist** | Edits in Oryx, flashes via Keymapp GUI, never touches us | Zero (they don't run us) |
-| **Oryx + read-only oryx-bench** | Edits in Oryx, uses us to lint/visualize, flashes via Keymapp | Zero (auto-pull) |
-| **Oryx + full oryx-bench** | Visual in Oryx, behavior in `overlay/`, flashes via us | Zero (auto-pull) |
+| **Oryx + read-only oryx-bench** | Edits in Oryx, uses us to lint/visualize, flashes via Keymapp or zapp | Zero (auto-pull) |
+| **Oryx + full oryx-bench** | Visual in Oryx, behavior in `overlay/`, flashes via us (delegates to `zapp`) | Zero (auto-pull) |
 | **Local-only** | `layout.toml` + `overlay/`, no Oryx at all | Zero (no Oryx involved) |
 | **Switcher** | Started in Oryx, then `oryx-bench detach` to local mode | One-time `detach` |
 
@@ -117,6 +118,26 @@ cd oryx-bench && cargo build --release
 
 Native and Nix build backends are tracked for a future release;
 everything else works on every platform.
+
+### Enabling `oryx-bench watch` on Linux (non-NixOS)
+
+`oryx-bench watch` opens the keyboard's raw-HID endpoint at
+`/dev/hidraw*`. That node is root-only by default; grant your user
+access by installing the bundled udev rules:
+
+```bash
+sudo cp packaging/linux/50-zsa.rules /etc/udev/rules.d/
+sudo udevadm control --reload && sudo udevadm trigger
+# unplug and replug the keyboard, then:
+oryx-bench watch --once
+```
+
+**NixOS users:** nothing to do — the flake's NixOS module enables
+`hardware.keyboard.zsa` for you, which pulls in the upstream
+`zsa-udev-rules` package.
+
+**macOS and Windows:** no setup. The OS grants the current user
+access to the HID interface automatically.
 
 ## Quickstart
 
@@ -166,11 +187,11 @@ my-voyager/
 
 In local mode, replace `pulled/` with `layout.toml`.
 
-## The 15 commands
+## The 16 commands
 
 | Command | What it does |
 |---|---|
-| `oryx-bench setup [--full]` | Detect toolchain (qmk, gcc-arm, zig, docker, wally-cli, keymapp, kontroll). Idempotent. `--full` runs each tool's `--version` for debugging. |
+| `oryx-bench setup [--full]` | Detect toolchain (qmk, gcc-arm, zig, docker, zapp). Idempotent. `--full` runs each tool's `--version` for debugging. |
 | `oryx-bench init` | Create project skeleton. `--hash` for Oryx mode, `--blank` for local mode. |
 | `oryx-bench attach --hash <H>` | Switch local-mode project to Oryx mode. Refuses without `--force` if `layout.toml` has uncommitted changes (or if the dir isn't a git repo). |
 | `oryx-bench detach [--force]` | Switch Oryx-mode project to local mode. **One-way.** |
@@ -181,7 +202,8 @@ In local mode, replace `pulled/` with `layout.toml`.
 | `oryx-bench lint [--strict] [--rule ID] [--format text\|json]` | Static analysis with 21 lint rules. |
 | `oryx-bench status` | One-screen overview of project, sync, build cache, lint. |
 | `oryx-bench build [--dry-run] [--emit-overlay-c]` | Compile firmware via the bundled Docker image. Cached. |
-| `oryx-bench flash [--dry-run] [--yes] [--force]` | Flash via wally-cli or Keymapp instructions. Refuses to flash a stale build unless `--force`. Requires explicit confirmation. |
+| `oryx-bench flash [--dry-run] [--yes] [--force]` | Flash via ZSA's [`zapp`](https://github.com/zsa/zapp) CLI (required on PATH). Refuses to flash a stale build unless `--force`. Requires explicit confirmation. |
+| `oryx-bench watch` (alias: `live`) | Live layer-state indicator window over raw HID — no Keymapp daemon. `--once` prints one snapshot and exits. `--layer-only` streams layer changes to stdout. `--set-layer N` / `--reset-layers` drive the firmware's layer override. |
 | `oryx-bench diff [REF] [--layer NAME]` | Semantic diff of the visual layout + overlay vs a git ref (default `HEAD`). |
 | `oryx-bench upgrade-check` | Re-run lint with the current keycode catalog after a tool upgrade. Surfaces uncatalogued keycodes. |
 | `oryx-bench skill install [--global]` | Install the project-local Claude Code skill. |
@@ -223,8 +245,17 @@ If a build produces a bad firmware, your layout is never lost:
   `git checkout` a known-good commit, rebuild, reflash.
 
 We never invoke `dfu-util` directly. The Voyager's flashing protocol is
-custom and bricking risk is real; we always go through `wally-cli` or
-Keymapp.
+custom and bricking risk is real; all flashing goes through ZSA's
+official [`zapp`](https://github.com/zsa/zapp) CLI, which owns the USB
+DFU and HALFKAY protocols natively. Install it once:
+
+```sh
+cargo install --git https://github.com/zsa/zapp zapp
+```
+
+(or grab a prebuilt binary from the zapp releases page). `oryx-bench
+flash` shells out to `zapp flash <firmware.bin>` after showing you the
+dry-run plan.
 
 ## Roadmap
 
@@ -233,7 +264,7 @@ authoring + lint + flash surface:
 
 - `setup`, `init` (both modes), `pull`, `show`, `explain`, `find`, `lint`,
   `status`, `skill install/remove` (read-side surface)
-- `attach`, `detach`, `build` (docker), `flash` (wally + Keymapp fallback)
+- `attach`, `detach`, `build` (docker), `flash` (zapp handoff)
 - `diff` (semantic vs git ref), `upgrade-check` (re-lint after tool upgrade)
 - 21 lint rules including the LT-on-high-freq footgun, achordion + key-override
   + combo + macro codegen, structural codegen round-trip test
@@ -242,7 +273,7 @@ authoring + lint + flash surface:
 
 - Native and Nix build backends
 - Moonlander and Ergodox geometries
-- `oryx-bench live` (layer state via kontroll/Keymapp gRPC)
+- `oryx-bench watch` (live layer-state indicator over raw HID; no Keymapp daemon required. `live` alias)
 - `oryx-bench tui` (in-terminal layout editor for local mode)
 - User-defined lint rules
 - SVG rendering via keymap-drawer subprocess
@@ -253,7 +284,8 @@ MIT. See [LICENSE](LICENSE).
 
 ## Prior art and credits
 
-- [ZSA Technology Labs](https://www.zsa.io/) for Oryx, Keymapp, `kontroll`,
+- [ZSA Technology Labs](https://www.zsa.io/) for Oryx, Keymapp, the
+  ["Oryx WebHID" raw-HID protocol](https://github.com/zsa/qmk_modules),
   and the public GraphQL endpoint at `oryx.zsa.io/graphql`.
 - [`poulainpi/oryx-with-custom-qmk`](https://github.com/poulainpi/oryx-with-custom-qmk)
   for proving the overlay-merge pattern works (we adapted the model for

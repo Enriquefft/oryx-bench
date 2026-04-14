@@ -184,7 +184,7 @@ cd /etc/nixos/keyboards/voyager
 oryx-bench show       # View the layout
 oryx-bench lint       # Check for issues
 oryx-bench build      # Build firmware.bin
-oryx-bench flash      # Flash to keyboard (with Keymapp or wally-cli)
+oryx-bench flash      # Flash to keyboard (delegates to ZSA's `zapp`)
 ```
 
 ## Building Without NixOS
@@ -253,13 +253,12 @@ sudo usermod -aG dialout $USER
 
 ## Advanced: Custom Build Options
 
-To add custom build options (e.g., different flash backend), modify the keyboard derivation:
-
-```nix
-programs.oryx-bench.keyboards.voyager.buildInputs = [
-  pkgs.wally-cli  # If available in nixpkgs
-];
-```
+To add extra runtime dependencies visible to the generated flash
+scripts, extend `buildInputs` on the keyboard derivation. The default
+flash path shells out to `zapp`, which is not yet in nixpkgs — install
+it once via `cargo install --git https://github.com/zsa/zapp zapp` or a
+user overlay, and make sure the resulting binary is on PATH for
+whichever user runs `flash-<name>`.
 
 ## Architecture Alignment
 

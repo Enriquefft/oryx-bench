@@ -86,25 +86,13 @@ fn flash_freshness_check_refuses_without_build_cache() {
 }
 
 #[test]
-fn flash_backend_keymapp_dry_run_shows_keymapp_label() {
-    let td = TempDir::new().unwrap();
-    init_with_firmware(&td);
-    oryx_bench()
-        .args(["flash", "--dry-run", "--backend", "keymapp", "--force"])
-        .current_dir(td.path())
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Keymapp"));
-}
-
-#[test]
 fn flash_backend_clap_rejects_unknown_variant() {
     // clap rejects unknown ValueEnum variants at argument-parse time
     // with a message that lists the legal values. We assert on the
     // bad value name and one of the legal alternatives so the test
-    // doesn't pin clap's exact wording. (The runtime
-    // "wally-cli not on PATH" path is covered by unit tests in
-    // src/flash/mod.rs::tests via the Environment trait.)
+    // doesn't pin clap's exact wording. (The runtime "zapp not on
+    // PATH" path is covered by unit tests in src/flash/mod.rs::tests
+    // via the Environment trait.)
     let td = TempDir::new().unwrap();
     init_with_firmware(&td);
     oryx_bench()
@@ -119,24 +107,5 @@ fn flash_backend_clap_rejects_unknown_variant() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("not-a-backend"))
-        .stderr(predicate::str::contains("keymapp"));
-}
-
-#[test]
-fn flash_without_yes_and_with_no_stdin_bails_safely() {
-    // Without --yes and with stdin closed, the prompt reads EOF and
-    // treats it as "no" — we never call into the backend.
-    let td = TempDir::new().unwrap();
-    init_with_firmware(&td);
-    let assert = oryx_bench()
-        .args(["flash", "--backend", "keymapp", "--force"])
-        .current_dir(td.path())
-        .stdin(std::process::Stdio::null())
-        .assert()
-        .success();
-    let stdout = std::str::from_utf8(&assert.get_output().stdout).unwrap();
-    assert!(
-        stdout.contains("Aborted"),
-        "expected 'Aborted' in stdout (EOF should be treated as 'no'), got: {stdout}"
-    );
+        .stderr(predicate::str::contains("zapp"));
 }

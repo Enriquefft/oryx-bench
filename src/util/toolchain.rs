@@ -39,20 +39,13 @@ const TOOLS: &[(&str, &str, &[&str])] = &[
     ("zig", "Zig compiler (Tier 2 overlay code)", &["version"]),
     ("docker", "Docker (the v0.1 build backend)", &["--version"]),
     (
-        "wally-cli",
-        "ZSA flasher (primary flash backend)",
+        "zapp",
+        "ZSA's official flasher — required by `oryx-bench flash`",
         &["--version"],
     ),
-    (
-        "keymapp",
-        "Keymapp GUI (fallback flash + recovery)",
-        &["--version"],
-    ),
-    (
-        "kontroll",
-        "Runtime keyboard inspection (optional)",
-        &["--version"],
-    ),
+    // Note: `oryx-bench watch` talks directly to the keyboard over raw
+    // HID; no daemon. Keymapp is intentionally not detected here — it
+    // is not required by any oryx-bench command path.
 ];
 
 /// Detect all known tools. Pure, idempotent.

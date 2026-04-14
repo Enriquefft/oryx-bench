@@ -26,7 +26,7 @@ pub struct Args {}
 
 pub fn run(_args: Args, project_override: Option<PathBuf>) -> Result<ExitCode> {
     let project = Project::discover(project_override.as_deref())?;
-    let layout = super::show::load_layout_for_explain(&project)?;
+    let layout = project.canonical_layout()?;
 
     println!("== oryx-bench upgrade check ==");
     println!("oryx-bench version: {}", env!("CARGO_PKG_VERSION"));

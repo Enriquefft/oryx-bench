@@ -92,44 +92,6 @@ mod geometry_name_tests {
     }
 }
 
-/// DFU flash parameters for a board's bootloader. Boards whose
-/// bootloader speaks the USB DFU protocol (Voyager, Moonlander)
-/// expose these; boards with other protocols (e.g. halfkay) don't.
-///
-/// Every field maps directly to a `dfu-util` flag so the flash
-/// backend can construct the command without any board-specific
-/// knowledge beyond what this struct carries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DfuParams {
-    /// USB vendor ID the bootloader enumerates as. May differ from the
-    /// normal-mode vendor ID (e.g. Moonlander boots as STM32 0x0483,
-    /// runs as ZSA 0x3297).
-    pub vendor_id: u16,
-    /// USB product ID the bootloader enumerates as.
-    pub product_id: u16,
-    /// DFU alternate setting (`-a` flag). Almost always 0.
-    pub alt_setting: u8,
-    /// Flash start address (`-s` flag). Board-specific; for Voyager
-    /// this is `0x0800_2000` (first 8 KB reserved for the bootloader).
-    pub start_address: u32,
-}
-
-impl DfuParams {
-    /// Format as `"VVVV:PPPP"` for dfu-util's `-d` flag.
-    pub fn device_id(&self) -> String {
-        format!("{:04x}:{:04x}", self.vendor_id, self.product_id)
-    }
-
-    /// Format the start address for dfu-util's `-s` flag.
-    pub fn address_spec(&self) -> String {
-        format!("{:#010X}:leave", self.start_address)
-    }
-}
-
-/// STM32 DFU vendor ID. `wally-cli` is only compatible with boards
-/// whose bootloader enumerates under this vendor.
-pub const STM32_DFU_VENDOR: u16 = 0x0483;
-
 /// A single keyboard's matrix and rendering metadata.
 pub trait Geometry: Send + Sync {
     /// Stable identifier matching Oryx's `geometry` field.
@@ -197,17 +159,6 @@ pub trait Geometry: Send + Sync {
     /// to fail-fast on link-time overflow with a more actionable
     /// message than `arm-none-eabi-ld: section overflow`.
     fn flash_budget_bytes(&self) -> u64;
-
-    /// DFU bootloader parameters. Boards with a DFU-capable bootloader
-    /// return `Some(...)` so the flash pipeline can invoke `dfu-util`
-    /// with the correct device ID and start address. Boards that use a
-    /// different protocol (e.g. halfkay / Teensy) return `None`.
-    ///
-    /// The default is `None` so adding a new geometry that doesn't
-    /// support DFU doesn't require stubbing this out.
-    fn dfu_params(&self) -> Option<DfuParams> {
-        None
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
