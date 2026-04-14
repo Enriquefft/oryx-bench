@@ -216,13 +216,9 @@ Options:
       --backend <BACKEND>
           Backend selection. `auto` (default) prefers wally-cli if installed and falls back to the
           Keymapp GUI handoff
-
-          Possible values:
-          - auto:    Prefer wally-cli if it's on PATH; otherwise fall back to keymapp
-          - wally:   Force `wally-cli`. Errors if it isn't installed
-          - keymapp: Force the Keymapp GUI handoff
           
           [default: auto]
+          [possible values: auto, dfu-util, wally, keymapp]
 
       --force
           Flash even if the firmware on disk doesn't match the current canonical inputs (i.e.
@@ -230,7 +226,7 @@ Options:
           know what you're doing
 
   -h, --help
-          Print help (see a summary with '-h')
+          Print help
 
 ```
 
