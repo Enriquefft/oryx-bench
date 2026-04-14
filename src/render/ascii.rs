@@ -546,7 +546,7 @@ fn render_thumbs(
         .unwrap_or(3);
 
     // Wide key minimum: ceil(standard × 1.5)
-    let wide_min = (standard_content * 3 + 1) / 2;
+    let wide_min = (standard_content * 3).div_ceil(2);
 
     let cell_widths: Vec<usize> = ordered
         .iter()
