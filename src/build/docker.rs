@@ -217,7 +217,8 @@ pub fn build(project: &Project, generated: &Generated, dry_run: bool) -> Result<
         .arg("/work")
         .arg(IMAGE_TAG)
         .args([
-            "bash", "-c",
+            "bash",
+            "-c",
             // QMK's Makefile copies the final .bin to /firmware/ (Make's
             // CWD), which is root-owned and fails under --user. The .bin
             // is already in the writable tmpfs at .build/. We let Make

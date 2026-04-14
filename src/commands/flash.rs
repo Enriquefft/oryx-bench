@@ -59,7 +59,7 @@ pub fn run(args: Args, project_override: Option<PathBuf>) -> Result<ExitCode> {
     }
 
     let geom = project_geometry(&project)?;
-    let backend = flash::detect_backend(args.backend)?;
+    let backend = flash::detect_backend(args.backend, geom)?;
     let plan = flash::plan(&firmware_path, backend, geom)?;
 
     if args.dry_run {
