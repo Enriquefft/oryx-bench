@@ -45,7 +45,7 @@ which = "7"
 once_cell = "1"
 humantime = "2"
 fs2 = "0.4"
-rand = "0.8"
+rand = "0.9.3"
 
 # `oryx-bench watch` — live runtime indicator + typing trainer.
 # Raw HID: talks to the keyboard directly (QMK usage page 0xFF60/0x61);

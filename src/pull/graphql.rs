@@ -405,7 +405,7 @@ fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
 /// thundering-herd problem when many clients all hit the same outage
 /// and recover together.
 ///
-/// Jitter is sourced from `rand::thread_rng()`, which on first use
+/// Jitter is sourced from `rand::rng()`, which on first use
 /// seeds itself from the OS RNG. The previous implementation used
 /// `SystemTime::now().subsec_nanos() % base_ms` which is correlated
 /// across NTP-synced hosts (same wallclock → same modulo result) and
@@ -429,7 +429,7 @@ fn backoff_delay(retry_attempt: u32) -> Duration {
     // future bump can't silently outgrow it.
     let shift = retry_attempt.min(BACKOFF_SHIFT_CAP);
     let expo = base_ms.saturating_mul(1u64 << shift);
-    let jitter = rand::thread_rng().gen_range(0..base_ms.max(1));
+    let jitter = rand::rng().random_range(0..base_ms.max(1));
     Duration::from_millis(expo.saturating_add(jitter))
 }
 
