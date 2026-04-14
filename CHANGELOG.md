@@ -9,6 +9,8 @@ Pre-1.0: minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-14
+
 ### Changed — flash pipeline delegates to ZSA's `zapp`
 
 `oryx-bench flash` now shells out to the official
@@ -550,4 +552,5 @@ New tests:
   an `xtask` binary** (not `build.rs`) so they cannot drift from the
   source they describe.
 
+[0.2.0]: https://github.com/enriquefft/oryx-bench/releases/tag/v0.2.0
 [0.1.0]: https://github.com/enriquefft/oryx-bench/releases/tag/v0.1.0

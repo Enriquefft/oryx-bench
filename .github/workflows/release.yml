@@ -29,10 +29,41 @@ jobs:
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
-  # ── 2. Create draft release (artifacts uploaded by build jobs) ───────────────
+  # ── 2. Preflight: tagged commit must compile, test, and have release notes ───
+  #     Gates release creation so a broken tag cannot produce an orphan draft.
+  preflight:
+    name: Preflight (build + test + notes)
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install libudev (hidapi build dep)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo check
+        run: cargo check --workspace --all-targets --locked
+
+      - name: cargo test
+        run: cargo test --workspace --locked
+
+      - name: Verify CHANGELOG has non-empty section for this version
+        run: |
+          VERSION=${{ needs.verify.outputs.version }}
+          awk "/^## \[${VERSION}\]/{found=1; next} found && /^## \[/{exit} found{print}" CHANGELOG.md > release_notes.md
+          if ! grep -q '[^[:space:]]' release_notes.md; then
+            echo "CHANGELOG.md has no entry (or empty entry) for [${VERSION}]" >&2
+            exit 1
+          fi
+
+  # ── 3. Create draft release (artifacts uploaded by build jobs) ───────────────
   create-release:
     name: Create draft release
-    needs: verify
+    needs: [verify, preflight]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,7 +88,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ── 3. Build and upload binaries ─────────────────────────────────────────────
+  # ── 4. Build and upload binaries ─────────────────────────────────────────────
   build:
     name: Build ${{ matrix.target }}
     needs: [verify, create-release]
@@ -85,7 +116,7 @@ jobs:
           archive: oryx-bench-$tag-${{ matrix.target }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
-  # ── 4. Publish release (undraft after all binaries are uploaded) ─────────────
+  # ── 5. Publish release (undraft after all binaries are uploaded) ─────────────
   publish-release:
     name: Publish release
     needs: build
@@ -96,7 +127,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ── 5. Publish to crates.io ──────────────────────────────────────────────────
+  # ── 6. Publish to crates.io ──────────────────────────────────────────────────
   publish-crates:
     name: Publish to crates.io
     needs: build
@@ -118,7 +149,7 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-  # ── 6. Deploy to AUR ─────────────────────────────────────────────────────────
+  # ── 7. Deploy to AUR ─────────────────────────────────────────────────────────
   deploy-aur:
     name: Deploy to AUR
     needs: [verify, build]
