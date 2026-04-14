@@ -1,15 +1,22 @@
-//! Flashing — wally-cli + Keymapp GUI handoff.
+//! Flashing — board-aware backend selection.
 //!
-//! v0.1 supports two backends with detection and fallback:
+//! Three backends, selected based on the keyboard's DFU parameters:
 //!
-//! 1. **wally-cli** if on PATH — invoked directly with the firmware path.
-//! 2. **Keymapp GUI handoff** as fallback — copies the `.bin` to
-//!    `~/.cache/oryx-bench/firmware.bin` and prints platform-specific
-//!    instructions for opening Keymapp's flasher manually.
+//! 1. **dfu-util** — direct invocation with board-specific vendor ID,
+//!    product ID, and start address. Required for boards whose bootloader
+//!    uses a non-STM32 USB ID (e.g. ZSA Voyager at `3297:0791`).
+//! 2. **wally-cli** — ZSA's CLI flasher. Only works with boards whose
+//!    bootloader enumerates as STM32 DFU (`0483:df11`).
+//! 3. **Keymapp GUI handoff** — stages firmware and prints instructions.
+//!    Always available; used as the fallback when no CLI flasher is
+//!    installed.
 //!
-//! We **never** invoke `dfu-util` directly. The Voyager's flashing
-//! protocol is custom and bricking risk is real.
+//! `Auto` mode inspects the board's [`Geometry::dfu_params`] to pick the
+//! right backend. Boards with a ZSA-specific bootloader (Voyager) get
+//! `dfu-util`; boards with an STM32 bootloader (Moonlander) prefer
+//! `wally-cli` then `dfu-util`; boards without DFU fall back to Keymapp.
 
+pub mod dfu_util;
 pub mod keymapp;
 pub mod wally;
 
@@ -19,9 +26,8 @@ use anyhow::{bail, Context, Result};
 use clap::ValueEnum;
 use sha2::{Digest, Sha256};
 
-/// A snapshot of "what we'd flash, where, and how" — produced before any
-/// destructive action so callers (and `--dry-run`) can show the user
-/// exactly what's about to happen.
+use crate::schema::geometry::{DfuParams, Geometry, STM32_DFU_VENDOR};
+
 #[derive(Debug, Clone)]
 pub struct FlashPlan {
     pub firmware_path: PathBuf,
@@ -30,64 +36,40 @@ pub struct FlashPlan {
     pub target_name: &'static str,
     pub target_vendor_id: &'static str,
     pub backend: Backend,
+    pub dfu_params: Option<DfuParams>,
 }
 
-/// User-facing `--backend` choice. Includes `Auto`, which is then
-/// resolved at runtime by [`detect_backend`] into a concrete
-/// [`Backend`]. Modeled as a `clap::ValueEnum` so a typo like
-/// `--backend dfu-util` is rejected at argument-parse time with a
-/// list of valid values, instead of being matched against an "unknown
-/// backend" branch deep inside `detect_backend`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
-#[value(rename_all = "lower")]
+#[value(rename_all = "kebab-case")]
 pub enum BackendChoice {
-    /// Prefer wally-cli if it's on PATH; otherwise fall back to keymapp.
     #[default]
     Auto,
-    /// Force `wally-cli`. Errors if it isn't installed.
+    DfuUtil,
     Wally,
-    /// Force the Keymapp GUI handoff.
     Keymapp,
 }
 
-/// Concrete backend that will perform the flash. Distinct from
-/// [`BackendChoice`] because `Auto` is not a concrete strategy — it's
-/// resolved into one of these by [`detect_backend`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Backend {
-    /// Direct invocation of `wally-cli` (preferred when available).
+    DfuUtil,
     Wally,
-    /// Stage the firmware in `~/.cache/oryx-bench/` and tell the user to
-    /// open Keymapp manually.
     Keymapp,
 }
 
 impl Backend {
     pub fn label(&self) -> &'static str {
         match self {
+            Backend::DfuUtil => "dfu-util",
             Backend::Wally => "wally-cli",
             Backend::Keymapp => "Keymapp (manual)",
         }
     }
 }
 
-/// Abstraction over the bits of the host environment that
-/// `detect_backend` needs to query. Concrete impl
-/// [`RealEnvironment`] consults the live PATH via `which::which`.
-/// Tests pass a stub so the "wally not installed" path is reachable
-/// without mutating CI's PATH.
-///
-/// The single method takes a binary name (rather than having one
-/// `wally_on_path()` method per binary) so adding a future probe —
-/// e.g. `dfu-util` for a hypothetical alternate backend — doesn't
-/// require growing the trait. The same `StubEnv` can serve every
-/// binary check.
 pub trait Environment {
-    /// True iff a binary with the given name is on PATH.
     fn binary_on_path(&self, name: &str) -> bool;
 }
 
-/// Production environment: actually probes PATH.
 pub struct RealEnvironment;
 
 impl Environment for RealEnvironment {
@@ -96,49 +78,85 @@ impl Environment for RealEnvironment {
     }
 }
 
-/// Resolve a user-facing [`BackendChoice`] into a concrete [`Backend`]
-/// using the real environment.
-pub fn detect_backend(requested: BackendChoice) -> Result<Backend> {
-    detect_backend_with(requested, &RealEnvironment)
+pub fn detect_backend(requested: BackendChoice, geom: &dyn Geometry) -> Result<Backend> {
+    detect_backend_with(requested, geom, &RealEnvironment)
 }
 
-/// Lower-level form that takes an [`Environment`] so tests can
-/// inject a stub for the wally-on-PATH probe.
-///
-/// `Auto` prefers wally-cli if it's on PATH and falls back to Keymapp.
-/// Explicit `Wally` errors if `wally-cli` isn't installed; explicit
-/// `Keymapp` always succeeds because the handoff has no dependencies.
-pub fn detect_backend_with(requested: BackendChoice, env: &dyn Environment) -> Result<Backend> {
+pub fn detect_backend_with(
+    requested: BackendChoice,
+    geom: &dyn Geometry,
+    env: &dyn Environment,
+) -> Result<Backend> {
+    let dfu = geom.dfu_params();
     match requested {
+        BackendChoice::Auto => auto_detect(dfu, geom, env),
+        BackendChoice::DfuUtil => {
+            if dfu.is_none() {
+                bail!(
+                    "the {} does not have DFU bootloader parameters — \
+                     use `--backend keymapp` instead.",
+                    geom.display_name(),
+                );
+            }
+            if !env.binary_on_path("dfu-util") {
+                bail!("`dfu-util` not found on PATH. Install it or use `--backend keymapp`.");
+            }
+            Ok(Backend::DfuUtil)
+        }
         BackendChoice::Wally => {
+            if let Some(p) = dfu {
+                if p.vendor_id != STM32_DFU_VENDOR {
+                    bail!(
+                        "`wally-cli` does not support the {} — its bootloader \
+                         uses vendor {:#06x}, not STM32 DFU ({:#06x}). \
+                         Use `--backend dfu-util` or `--backend auto`.",
+                        geom.display_name(),
+                        p.vendor_id,
+                        STM32_DFU_VENDOR,
+                    );
+                }
+            }
             if !env.binary_on_path("wally-cli") {
                 bail!(
-                    "`wally-cli` not found on PATH. Install it from https://github.com/zsa/wally-cli or use `--backend keymapp`."
+                    "`wally-cli` not found on PATH. Install it from \
+                     https://github.com/zsa/wally-cli or use `--backend keymapp`."
                 );
             }
             Ok(Backend::Wally)
         }
         BackendChoice::Keymapp => Ok(Backend::Keymapp),
-        BackendChoice::Auto => {
-            if env.binary_on_path("wally-cli") {
-                Ok(Backend::Wally)
-            } else {
-                Ok(Backend::Keymapp)
-            }
-        }
     }
 }
 
-/// Build a [`FlashPlan`] for `firmware_path`. Verifies the file exists.
-///
-/// Pulls the target name and USB vendor ID from `geometry`'s trait
-/// methods so the dry-run output never drifts from the canonical
-/// per-board metadata in `crate::schema::geometry`.
-pub fn plan(
-    firmware_path: &Path,
-    backend: Backend,
-    geometry: &dyn crate::schema::geometry::Geometry,
-) -> Result<FlashPlan> {
+fn auto_detect(
+    dfu: Option<DfuParams>,
+    geom: &dyn Geometry,
+    env: &dyn Environment,
+) -> Result<Backend> {
+    let Some(params) = dfu else {
+        return Ok(Backend::Keymapp);
+    };
+    if params.vendor_id == STM32_DFU_VENDOR {
+        if env.binary_on_path("wally-cli") {
+            return Ok(Backend::Wally);
+        }
+        if env.binary_on_path("dfu-util") {
+            return Ok(Backend::DfuUtil);
+        }
+        return Ok(Backend::Keymapp);
+    }
+    if env.binary_on_path("dfu-util") {
+        return Ok(Backend::DfuUtil);
+    }
+    eprintln!(
+        "warning: `dfu-util` not found on PATH — the {} requires it for \
+         direct flashing. Falling back to Keymapp GUI handoff.",
+        geom.display_name(),
+    );
+    Ok(Backend::Keymapp)
+}
+
+pub fn plan(firmware_path: &Path, backend: Backend, geometry: &dyn Geometry) -> Result<FlashPlan> {
     if !firmware_path.exists() {
         bail!(
             "no firmware at {} — run `oryx-bench build` first",
@@ -149,7 +167,6 @@ pub fn plan(
         .with_context(|| format!("statting {}", firmware_path.display()))?
         .len();
     let sha256 = sha256_of_file(firmware_path)?;
-
     Ok(FlashPlan {
         firmware_path: firmware_path.to_path_buf(),
         size_bytes,
@@ -157,15 +174,10 @@ pub fn plan(
         target_name: geometry.display_name(),
         target_vendor_id: geometry.usb_vendor_id(),
         backend,
+        dfu_params: geometry.dfu_params(),
     })
 }
 
-/// Compute the SHA-256 of a file as a lowercase hex string.
-///
-/// Single source of truth for firmware hashing. Both [`plan`] and the
-/// docker build backend use this so the hash format never drifts
-/// between "what the user sees in --dry-run" and "what the build
-/// cache stores".
 pub fn sha256_of_file(path: &Path) -> Result<String> {
     let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
     let mut hasher = Sha256::new();
@@ -173,24 +185,35 @@ pub fn sha256_of_file(path: &Path) -> Result<String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-/// Render the plan as a multi-line string for `--dry-run` and the
-/// confirmation prompt.
 pub fn render_plan(plan: &FlashPlan) -> String {
-    format!(
+    let mut out = format!(
         "  firmware:  {}\n  size:      {} bytes\n  sha256:    {}\n  target:    {} (vendor {})\n  via:       {}",
         plan.firmware_path.display(),
         plan.size_bytes,
         plan.sha256,
         plan.target_name,
         plan.target_vendor_id,
-        plan.backend.label()
-    )
+        plan.backend.label(),
+    );
+    if let (Backend::DfuUtil, Some(ref params)) = (plan.backend, &plan.dfu_params) {
+        out.push_str(&format!(
+            "\n  dfu args:  -d {} -a {} -s {}",
+            params.device_id(),
+            params.alt_setting,
+            params.address_spec(),
+        ));
+    }
+    out
 }
 
-/// Execute the plan. This is the irreversible step. Callers must have
-/// already confirmed with the user.
 pub fn execute(plan: &FlashPlan) -> Result<()> {
     match plan.backend {
+        Backend::DfuUtil => {
+            let params = plan.dfu_params.as_ref().ok_or_else(|| {
+                anyhow::anyhow!("BUG: DfuUtil backend selected but FlashPlan has no dfu_params")
+            })?;
+            dfu_util::flash(&plan.firmware_path, params)
+        }
         Backend::Wally => wally::flash(&plan.firmware_path),
         Backend::Keymapp => keymapp::handoff(&plan.firmware_path),
     }
@@ -202,7 +225,7 @@ mod tests {
     use crate::schema::geometry;
     use tempfile::TempDir;
 
-    fn voyager() -> &'static dyn geometry::Geometry {
+    fn voyager() -> &'static dyn Geometry {
         geometry::get("voyager").unwrap()
     }
 
@@ -228,6 +251,17 @@ mod tests {
     }
 
     #[test]
+    fn plan_carries_dfu_params_for_voyager() {
+        let td = TempDir::new().unwrap();
+        let path = td.path().join("firmware.bin");
+        std::fs::write(&path, b"x").unwrap();
+        let p = plan(&path, Backend::DfuUtil, voyager()).unwrap();
+        let params = p.dfu_params.expect("Voyager plan should carry DFU params");
+        assert_eq!(params.vendor_id, 0x3297);
+        assert_eq!(params.product_id, 0x0791);
+    }
+
+    #[test]
     fn render_plan_has_all_fields() {
         let td = TempDir::new().unwrap();
         let path = td.path().join("firmware.bin");
@@ -242,20 +276,29 @@ mod tests {
         assert!(rendered.contains("wally-cli"));
     }
 
-    /// Stub environment for tests: lets each test pin whether a
-    /// given binary is "on PATH" without touching the real shell
-    /// env. Generic over binary name so this fixture serves every
-    /// future flash backend's probe (dfu-util, etc.).
+    #[test]
+    fn render_plan_shows_dfu_args_for_dfu_util_backend() {
+        let td = TempDir::new().unwrap();
+        let path = td.path().join("firmware.bin");
+        std::fs::write(&path, b"x").unwrap();
+        let p = plan(&path, Backend::DfuUtil, voyager()).unwrap();
+        let rendered = render_plan(&p);
+        assert!(rendered.contains("dfu-util"));
+        assert!(rendered.contains("3297:0791"));
+        assert!(rendered.contains("0x08002000:leave"));
+    }
+
     struct StubEnv {
         present: std::collections::HashSet<&'static str>,
     }
     impl StubEnv {
-        fn with_wally(present: bool) -> Self {
-            let mut set = std::collections::HashSet::new();
-            if present {
-                set.insert("wally-cli");
+        fn with(binaries: &[&'static str]) -> Self {
+            Self {
+                present: binaries.iter().copied().collect(),
             }
-            Self { present: set }
+        }
+        fn empty() -> Self {
+            Self::with(&[])
         }
     }
     impl Environment for StubEnv {
@@ -265,51 +308,203 @@ mod tests {
     }
 
     #[test]
-    fn detect_backend_keymapp_explicit() {
-        // keymapp doesn't need a binary on PATH.
+    fn detect_keymapp_always_succeeds() {
+        let env = StubEnv::empty();
         assert_eq!(
-            detect_backend(BackendChoice::Keymapp).unwrap(),
+            detect_backend_with(BackendChoice::Keymapp, voyager(), &env).unwrap(),
             Backend::Keymapp
         );
     }
 
     #[test]
-    fn detect_backend_wally_explicit_errors_when_missing() {
-        let env = StubEnv::with_wally(false);
-        let err = detect_backend_with(BackendChoice::Wally, &env).unwrap_err();
+    fn detect_dfu_util_explicit_ok_when_installed() {
+        let env = StubEnv::with(&["dfu-util"]);
+        assert_eq!(
+            detect_backend_with(BackendChoice::DfuUtil, voyager(), &env).unwrap(),
+            Backend::DfuUtil
+        );
+    }
+
+    #[test]
+    fn detect_dfu_util_explicit_errors_when_missing() {
+        let env = StubEnv::empty();
+        let err = detect_backend_with(BackendChoice::DfuUtil, voyager(), &env).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("dfu-util") && msg.contains("PATH"), "{msg}");
+    }
+
+    #[test]
+    fn detect_wally_explicit_rejects_voyager() {
+        let env = StubEnv::with(&["wally-cli"]);
+        let err = detect_backend_with(BackendChoice::Wally, voyager(), &env).unwrap_err();
         let msg = err.to_string();
         assert!(
-            msg.contains("wally-cli") && msg.contains("PATH"),
-            "expected wally-cli error: {msg}"
+            msg.contains("wally-cli") && msg.contains("does not support"),
+            "{msg}"
         );
-        // The error must point at a recovery action.
-        assert!(msg.contains("--backend keymapp"));
+        assert!(
+            msg.contains("--backend dfu-util") || msg.contains("--backend auto"),
+            "{msg}"
+        );
     }
 
     #[test]
-    fn detect_backend_wally_explicit_succeeds_when_present() {
-        let env = StubEnv::with_wally(true);
+    fn detect_wally_explicit_errors_when_missing() {
+        let env = StubEnv::empty();
+        let err = detect_backend_with(BackendChoice::Wally, &Stm32Board, &env).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("wally-cli") && msg.contains("PATH"), "{msg}");
+        assert!(msg.contains("--backend keymapp"), "{msg}");
+    }
+
+    #[test]
+    fn detect_wally_explicit_succeeds_for_stm32_board() {
+        let env = StubEnv::with(&["wally-cli"]);
         assert_eq!(
-            detect_backend_with(BackendChoice::Wally, &env).unwrap(),
+            detect_backend_with(BackendChoice::Wally, &Stm32Board, &env).unwrap(),
             Backend::Wally
         );
     }
 
     #[test]
-    fn detect_backend_auto_prefers_wally_when_present() {
-        let env = StubEnv::with_wally(true);
+    fn auto_voyager_prefers_dfu_util() {
+        let env = StubEnv::with(&["dfu-util", "wally-cli"]);
         assert_eq!(
-            detect_backend_with(BackendChoice::Auto, &env).unwrap(),
-            Backend::Wally
+            detect_backend_with(BackendChoice::Auto, voyager(), &env).unwrap(),
+            Backend::DfuUtil
         );
     }
 
     #[test]
-    fn detect_backend_auto_falls_back_to_keymapp() {
-        let env = StubEnv::with_wally(false);
+    fn auto_voyager_falls_back_to_keymapp_without_dfu_util() {
+        let env = StubEnv::with(&["wally-cli"]);
         assert_eq!(
-            detect_backend_with(BackendChoice::Auto, &env).unwrap(),
+            detect_backend_with(BackendChoice::Auto, voyager(), &env).unwrap(),
             Backend::Keymapp
         );
+    }
+
+    #[test]
+    fn auto_stm32_prefers_wally() {
+        let env = StubEnv::with(&["wally-cli", "dfu-util"]);
+        assert_eq!(
+            detect_backend_with(BackendChoice::Auto, &Stm32Board, &env).unwrap(),
+            Backend::Wally
+        );
+    }
+
+    #[test]
+    fn auto_stm32_falls_back_to_dfu_util() {
+        let env = StubEnv::with(&["dfu-util"]);
+        assert_eq!(
+            detect_backend_with(BackendChoice::Auto, &Stm32Board, &env).unwrap(),
+            Backend::DfuUtil
+        );
+    }
+
+    #[test]
+    fn auto_stm32_falls_back_to_keymapp() {
+        let env = StubEnv::empty();
+        assert_eq!(
+            detect_backend_with(BackendChoice::Auto, &Stm32Board, &env).unwrap(),
+            Backend::Keymapp
+        );
+    }
+
+    #[test]
+    fn auto_no_dfu_board_always_keymapp() {
+        let env = StubEnv::with(&["wally-cli", "dfu-util"]);
+        assert_eq!(
+            detect_backend_with(BackendChoice::Auto, &NoDfuBoard, &env).unwrap(),
+            Backend::Keymapp
+        );
+    }
+
+    struct Stm32Board;
+    impl Geometry for Stm32Board {
+        fn id(&self) -> &'static str {
+            "stm32-test"
+        }
+        fn display_name(&self) -> &'static str {
+            "Test STM32 Board"
+        }
+        fn matrix_key_count(&self) -> usize {
+            1
+        }
+        fn encoder_count(&self) -> usize {
+            0
+        }
+        fn position_to_index(&self, _: &str) -> Option<usize> {
+            None
+        }
+        fn index_to_position(&self, _: usize) -> Option<&'static str> {
+            None
+        }
+        fn ascii_layout(&self) -> &'static geometry::GridLayout {
+            unimplemented!()
+        }
+        fn qmk_keyboard(&self) -> &'static str {
+            "test/stm32"
+        }
+        fn layout_macro(&self) -> &'static str {
+            "LAYOUT"
+        }
+        fn qmk_arg_order(&self) -> &'static [usize] {
+            &[0]
+        }
+        fn usb_vendor_id(&self) -> &'static str {
+            "0x0483"
+        }
+        fn flash_budget_bytes(&self) -> u64 {
+            64 * 1024
+        }
+        fn dfu_params(&self) -> Option<DfuParams> {
+            Some(DfuParams {
+                vendor_id: STM32_DFU_VENDOR,
+                product_id: 0xDF11,
+                alt_setting: 0,
+                start_address: 0x0800_0000,
+            })
+        }
+    }
+
+    struct NoDfuBoard;
+    impl Geometry for NoDfuBoard {
+        fn id(&self) -> &'static str {
+            "no-dfu-test"
+        }
+        fn display_name(&self) -> &'static str {
+            "Test No-DFU Board"
+        }
+        fn matrix_key_count(&self) -> usize {
+            1
+        }
+        fn encoder_count(&self) -> usize {
+            0
+        }
+        fn position_to_index(&self, _: &str) -> Option<usize> {
+            None
+        }
+        fn index_to_position(&self, _: usize) -> Option<&'static str> {
+            None
+        }
+        fn ascii_layout(&self) -> &'static geometry::GridLayout {
+            unimplemented!()
+        }
+        fn qmk_keyboard(&self) -> &'static str {
+            "test/nodfu"
+        }
+        fn layout_macro(&self) -> &'static str {
+            "LAYOUT"
+        }
+        fn qmk_arg_order(&self) -> &'static [usize] {
+            &[0]
+        }
+        fn usb_vendor_id(&self) -> &'static str {
+            "0x0000"
+        }
+        fn flash_budget_bytes(&self) -> u64 {
+            64 * 1024
+        }
     }
 }
