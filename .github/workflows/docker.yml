@@ -60,5 +60,5 @@ jobs:
       - name: Verify image
         if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
         run: |
-          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }} \
+          docker run --rm ${{ fromJSON(steps.meta.outputs.json).tags[0] }} \
             sh -c 'qmk --version && arm-none-eabi-gcc --version && zig version'
