@@ -9,6 +9,54 @@ Pre-1.0: minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-04-15
+
+### Changed — nix build migrated to crane
+
+`flake.nix` now builds `oryx-bench` via [crane](https://github.com/ipetkov/crane)
+instead of `rustPlatform.buildRustPackage`. Cold builds are comparable;
+incremental rebuilds after a source change drop from ~10 minutes to seconds
+because crane caches the dependency graph in a separate nix derivation
+keyed on `Cargo.lock` + toolchain, so only the workspace crate recompiles
+when application code changes.
+
+Source filter switched from `craneLib.cleanCargoSource` (rust-only, strips
+`skills/`, `packaging/docker/`, `examples/`) to `pkgs.nix-gitignore.gitignoreSource`
+so assets referenced by `include_str!` ride along while `target/` and other
+gitignored dirs stay out of the store copy. This also fixes the slow
+store ingest observed on dirty path-flake inputs (full tree copied
+instead of gitignore-aware).
+
+- `flake.nix` — crane input + `commonArgs` / `cargoArtifacts` split;
+  `guiLibs` collected in one place for `buildInputs`, `postFixup`
+  rpath, and the devShell hook (single source of truth).
+- `flake.lock` — records new `crane` input.
+
+No CLI, runtime, or API change. Distro users see identical binaries.
+
+### Fixed — `zapp flash` rejected v0.2.0 firmware (no DFU suffix)
+
+`oryx-bench flash` failed at the zapp loader with `Invalid firmware:
+not a valid firmware file (no DFU suffix or Intel HEX header found)`
+for every .bin produced by v0.2.0. Root cause: `src/generate/rules_mk.rs`
+emitted `DFU_SUFFIX_ARGS =` (empty), overriding the Voyager upstream
+default and producing raw .bin without the suffix zapp's loader
+requires. The earlier assumption that zapp identified devices purely
+at the USB protocol level and ignored the suffix was wrong — it
+requires a DFU suffix for STM32 .bin or an Intel HEX header for
+HALFKAY.
+
+- `src/generate/rules_mk.rs` — removed the `DFU_SUFFIX_ARGS =`
+  override so QMK's upstream Voyager default (correct vendor/product
+  IDs) stamps the suffix during compile.
+- `packaging/docker/Dockerfile` — restored `dfu-util` (provides
+  `dfu-suffix`, required by QMK's build step).
+- `docs/v0.2-flash-issues.md` — corrected the section on zapp's
+  suffix handling; documented the incident.
+
+Users on v0.2.0 must rebuild firmware (`oryx-bench build`) before
+flashing.
+
 ## [0.2.0] - 2026-04-14
 
 ### Changed — flash pipeline delegates to ZSA's `zapp`

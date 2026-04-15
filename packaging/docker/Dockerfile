@@ -39,6 +39,7 @@ RUN apt-get update -qq && \
     python3-pip \
     python3-venv \
     libusb-1.0-0-dev \
+    dfu-util \
     && rm -rf /var/lib/apt/lists/*
 
 # Install ARM embedded toolchain

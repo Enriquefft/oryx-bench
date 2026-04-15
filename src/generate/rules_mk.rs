@@ -141,16 +141,6 @@ pub fn emit_rules_mk(
         out.push_str("TAP_DANCE_ENABLE = yes\n\n");
     }
 
-    // Disable the DFU suffix. The Voyager's upstream rules.mk stamps
-    // vendor/product IDs into the .bin via DFU_SUFFIX_ARGS; `zapp`
-    // validates the target device at the USB protocol level, not from
-    // file metadata, so the suffix is dead weight in our pipeline.
-    // Dropping it also removes a QMK build step that shells out to
-    // `dfu-suffix` — one fewer host-side tool the Docker image has
-    // to ship.
-    out.push_str("# Disable DFU suffix — unused by zapp; removes a host-side build dep\n");
-    out.push_str("DFU_SUFFIX_ARGS =\n\n");
-
     // Always-on additions: the generated _features.c.
     out.push_str("SRC += _features.c\n");
 

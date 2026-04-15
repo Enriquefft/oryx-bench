@@ -8,6 +8,12 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    # Crane builds the crate in two derivations: a deps-only layer
+    # (cached, changes only when Cargo.lock changes) plus the workspace
+    # crate itself. Path-flake iterations rebuild only the second
+    # layer — ~10min cold starts drop to seconds. Also filters
+    # `target/` out of the store copy even on dirty trees.
+    crane.url = "github:ipetkov/crane";
   };
 
   outputs =
@@ -16,69 +22,13 @@
       nixpkgs,
       flake-utils,
       rust-overlay,
+      crane,
     }:
     let
       # Read the package metadata from Cargo.toml so the flake's
       # version always matches what cargo builds. Single source of
       # truth — no hand-maintained version constants in this file.
       cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
-
-      # Helper to build oryx-bench for a given system
-      mkOryx =
-        system:
-        let
-          pkgs = import nixpkgs { inherit system; };
-        in
-        pkgs.rustPlatform.buildRustPackage {
-          pname = cargoToml.package.name;
-          version = cargoToml.package.version;
-          src = ./.;
-          cargoLock.lockFile = ./Cargo.lock;
-          nativeBuildInputs = [
-            pkgs.pkg-config
-          ];
-          # eframe/egui (used by `oryx-bench watch`'s GUI window) need
-          # graphics + wayland/X11 + input libs at both link time and
-          # runtime. Bundled here so `nix run` and NixOS module users
-          # get a working GUI with no further setup.
-          buildInputs = with pkgs; [
-            libGL
-            libxkbcommon
-            wayland
-            fontconfig
-            libx11
-            libxcursor
-            libxi
-            libxrandr
-            libxcb
-            # `oryx-bench watch` uses hidapi (C implementation, linux-
-            # static-hidraw feature) to open the ZSA keyboard's raw-HID
-            # endpoint. hidapi itself statically links, but its
-            # enumerator calls into libudev to walk /sys/class/hidraw/.
-            udev
-          ];
-          # glow/winit dlopen the GL + wayland libs at runtime.
-          postFixup = ''
-            patchelf --set-rpath "${pkgs.lib.makeLibraryPath [
-              pkgs.libGL
-              pkgs.libxkbcommon
-              pkgs.wayland
-              pkgs.fontconfig
-              pkgs.libx11
-              pkgs.libxcursor
-              pkgs.libxi
-              pkgs.libxrandr
-              pkgs.libxcb
-            ]}" $out/bin/oryx-bench
-          '';
-          doCheck = false;
-          meta = with pkgs.lib; {
-            description = cargoToml.package.description;
-            homepage = cargoToml.package.homepage;
-            license = licenses.mit;
-            mainProgram = "oryx-bench";
-          };
-        };
 
       # ZSA's `zapp` CLI — the flash backend oryx-bench delegates to.
       # Pinned to a specific commit so the package hash is
@@ -144,7 +94,76 @@
             ];
           };
 
-          oryx-bench = mkOryx system;
+          # Crane lib pinned to the same toolchain as the devShell —
+          # one Rust version across interactive dev, nix-built
+          # artifacts, and CI.
+          craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
+
+          # GUI + hidapi runtime lib set — listed once, referenced by
+          # buildInputs, postFixup rpath, and the devShell hook.
+          guiLibs = with pkgs; [
+            libGL
+            libxkbcommon
+            wayland
+            fontconfig
+            libx11
+            libxcursor
+            libxi
+            libxrandr
+            libxcb
+            # `oryx-bench watch` uses hidapi (C implementation, linux-
+            # static-hidraw feature) to open the ZSA keyboard's raw-HID
+            # endpoint. hidapi itself statically links, but its
+            # enumerator calls into libudev to walk /sys/class/hidraw/.
+            udev
+          ];
+
+          # Shared crane args between the deps-only layer and the
+          # final crate build. Keep lean — anything that varies per
+          # derivation (pname, version, postFixup, meta) goes on the
+          # individual build, not here, otherwise deps cache misses.
+          #
+          # Source filter: gitignore-aware so `target/`, `result/`,
+          # `.oryx-bench/` etc. are dropped from the store copy, while
+          # non-rust assets referenced by `include_str!` (skills/,
+          # packaging/docker/, examples/) ride along. craneLib's
+          # default `cleanCargoSource` is rust-only and breaks those
+          # embeds.
+          commonArgs = {
+            src = pkgs.nix-gitignore.gitignoreSource [ ] ./.;
+            strictDeps = true;
+            nativeBuildInputs = [ pkgs.pkg-config ];
+            buildInputs = guiLibs;
+            doCheck = false;
+          };
+
+          # Compile just the dependency graph. Cached in the nix
+          # store keyed on Cargo.lock + toolchain — reused across
+          # every workspace code change until a dep is bumped.
+          cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+
+          oryx-bench = craneLib.buildPackage (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              pname = cargoToml.package.name;
+              version = cargoToml.package.version;
+              # glow/winit dlopen the GL + wayland libs at runtime;
+              # hidapi dlopens libudev.so.1 for /sys/class/hidraw/
+              # enumeration. Bake the paths into rpath so the binary
+              # works from any PATH without LD_LIBRARY_PATH.
+              postFixup = ''
+                patchelf --set-rpath "${pkgs.lib.makeLibraryPath guiLibs}" $out/bin/oryx-bench
+              '';
+              meta = with pkgs.lib; {
+                description = cargoToml.package.description;
+                homepage = cargoToml.package.homepage;
+                license = licenses.mit;
+                mainProgram = "oryx-bench";
+              };
+            }
+          );
+
           zapp = mkZapp system;
         in
         {
@@ -162,16 +181,9 @@
               # window; the libs below are linked at build time and
               # dlopened at runtime by glow/winit. libudev is linked
               # for hidapi's /sys/class/hidraw/ enumeration.
-              pkgs.libGL
-              pkgs.libxkbcommon
-              pkgs.wayland
-              pkgs.fontconfig
-              pkgs.libx11
-              pkgs.libxcursor
-              pkgs.libxi
-              pkgs.libxrandr
-              pkgs.libxcb
-              pkgs.udev
+            ]
+            ++ guiLibs
+            ++ [
 
               # Generally useful
               pkgs.git
@@ -221,19 +233,7 @@
               #     `./target/release/oryx-bench` invoked from outside
               #     the shell (e.g. a user's normal terminal) still
               #     finds them. Matches what `nix run` does via postFixup.
-              __ORYX_GUI_LIBS="${
-                pkgs.lib.makeLibraryPath [
-                  pkgs.libGL
-                  pkgs.libxkbcommon
-                  pkgs.wayland
-                  pkgs.fontconfig
-                  pkgs.libx11
-                  pkgs.libxcursor
-                  pkgs.libxi
-                  pkgs.libxrandr
-                  pkgs.libxcb
-                ]
-              }"
+              __ORYX_GUI_LIBS="${pkgs.lib.makeLibraryPath guiLibs}"
               export LD_LIBRARY_PATH="$__ORYX_GUI_LIBS:$LD_LIBRARY_PATH"
               export ORYX_RUNTIME_RPATH="$__ORYX_GUI_LIBS"
             '';

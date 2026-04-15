@@ -3,12 +3,14 @@ name: Docker Image
 on:
   push:
     branches: [main]
+    tags: ["v*"]
     paths:
       - "packaging/docker/**"
       - "Cargo.toml"
       - ".github/workflows/docker.yml"
   release:
     types: [published]
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
@@ -49,14 +51,14 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./packaging/docker
-          push: ${{ github.event_name == 'release' || github.ref == 'refs/heads/main' }}
+          push: ${{ github.event_name == 'release' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Verify image
-        if: github.event_name == 'release'
+        if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
         run: |
           docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }} \
             sh -c 'qmk --version && arm-none-eabi-gcc --version && zig version'
