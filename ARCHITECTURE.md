@@ -990,7 +990,7 @@ ghcr.io/enriquefft/oryx-bench-qmk:<release-tag>
 Image size target: ≤ 1GB compressed. Pulled once on first build, cached
 forever in the local Docker store.
 
-- Generated firmware always carries the Oryx HID handler (`RAW_ENABLE = yes`, `RGB_MATRIX_ENABLE = yes`, `COMMUNITY_MODULES += oryx`) so `oryx-bench watch` works out of the box against our own output. The three flags are owned by `src/generate/rules_mk.rs::WATCH_REQUIRED_RULES_MK` (SSOT) and emitted unconditionally; a user setting `rgb_matrix = false` in `features.toml` is rejected at codegen time because it would silently break `watch`.
+- Generated firmware always carries the Oryx HID handler (`RAW_ENABLE = yes`, `RGB_MATRIX_ENABLE = yes`, `ORYX_ENABLE = yes`) so `oryx-bench watch` works out of the box against our own output. The three flags are owned by `src/generate/rules_mk.rs::WATCH_REQUIRED_RULES_MK` (SSOT) and emitted unconditionally; a user setting `rgb_matrix = false` in `features.toml` is rejected at codegen time because it would silently break `watch`.
 
 ### `src/flash/` — flashing
 
@@ -1532,9 +1532,11 @@ The keyboard must be built with three QMK flags for the watch
 feature to work end-to-end:
 
 ```mk
-RAW_ENABLE = yes             # exposes usage page 0xFF60 / usage 0x61
-COMMUNITY_MODULES += oryx    # adds the Oryx WebHID handler
-RGB_MATRIX_ENABLE = yes      # required by the RGB command surface
+RAW_ENABLE = yes          # exposes usage page 0xFF60 / usage 0x61
+ORYX_ENABLE = yes         # adds the Oryx WebHID handler (processed by
+                          # keyboards/zsa/common/features.mk in ZSA's
+                          # qmk_firmware fork — not a community module)
+RGB_MATRIX_ENABLE = yes   # required by the RGB command surface
 ```
 
 Stock ZSA firmware (anything built by Oryx / shipped on a new

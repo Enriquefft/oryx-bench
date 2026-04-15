@@ -81,6 +81,7 @@ impl KeyEntry {
                 tap_hold: tap_hold.as_deref().map(parse_action),
                 tapping_term: *tapping_term,
                 custom_label: custom_label.clone(),
+                glow_color: None,
             },
         }
     }

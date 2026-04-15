@@ -1,23 +1,45 @@
 //! Pixel-precise split-keyboard renderer.
 //!
-//! Reuses the canonical `GridLayout` from the geometry trait — the same
-//! description the ASCII renderer consumes — to place key rectangles
-//! in physical split-half order. Works with any geometry that
-//! implements the trait; no per-keyboard GUI code.
+//! Drives off `Geometry::physical_layout()` — per-key top-left (x, y)
+//! in 1u units plus an optional cluster rotation — so columnar stagger,
+//! split gap, and angled thumb clusters are a pure geometry concern.
+//! This module is generic across keyboards; nothing here knows about
+//! Voyager specifically.
+//!
+//! Rendering path, per key:
+//!   1. Scale 1u → pixels using a single `KEY_UNIT_PX` so the entire
+//!      board scales uniformly with the viewport.
+//!   2. Translate so the board's bbox is centered in the available rect.
+//!   3. If the key's `rot_deg != 0`, rotate the cap's four corners
+//!      around its pivot and draw as a convex polygon with a rotated
+//!      text label. Un-rotated keys take the fast rect path.
 
-use egui::{Align2, Color32, Context, FontFamily, FontId, Rect, Stroke, Ui, Vec2};
+use egui::{
+    epaint::{PathShape, TextShape},
+    Align2, Color32, Context, FontFamily, FontId, Pos2, Rect, Shape, Stroke, Ui, Vec2,
+};
 
 use crate::render::ascii::friendly_key;
 use crate::schema::canonical::{CanonicalLayer, CanonicalLayout};
-use crate::schema::geometry::{Geometry, ThumbKeyWidth};
+use crate::schema::geometry::{Geometry, PhysicalKey};
 
 use super::theme;
 
-const KEY_SIZE: f32 = 48.0;
-const KEY_GAP: f32 = 4.0;
-const HALF_GAP: f32 = 40.0;
-const ROW_GAP: f32 = 4.0;
-const THUMB_SPACING: f32 = 8.0;
+/// 1u in pixels. The entire layout scales linearly with this constant,
+/// so it's also the knob for "make the keys bigger" complaints.
+const KEY_UNIT_PX: f32 = 56.0;
+/// Cap footprint as a fraction of a 1u cell. Leaves a thin gutter
+/// between keys without dropping back to a separate `GAP` constant —
+/// the gutter is implicit in the cap shrinking by (1 - factor).
+const CAP_FACTOR: f32 = 0.92;
+/// Corner radius in pixels for non-rotated caps. Rotated caps fall
+/// back to sharp corners (rotated rounded-rect would require bezier
+/// path work egui doesn't expose directly, and the thumb clusters
+/// still read fine with square corners at this size).
+const CAP_CORNER_PX: f32 = 6.0;
+/// Bottom padding in 1u units. Without this the rotated thumb corner
+/// can clip the footer.
+const BBOX_BOTTOM_PAD: f32 = 0.25;
 
 /// Options for a single frame's render.
 pub struct RenderOpts<'a> {
@@ -27,172 +49,211 @@ pub struct RenderOpts<'a> {
     /// Matrix indices to highlight above the default coloring (next-key
     /// pulse, combo participants). Empty for the bare indicator.
     pub highlight: &'a [usize],
+    /// Matrix indices the firmware currently reports as held down.
+    /// Drawn distinct from `highlight` so a combo-hint and a real press
+    /// never alias.
+    pub pressed: &'a [usize],
 }
 
 /// Draw the full split keyboard centered in the provided ui's available
-/// rect. Returns the pixel rect actually used so callers can stack
-/// widgets under it.
+/// rect. Returns the pixel rect actually used.
 pub fn draw(ui: &mut Ui, opts: &RenderOpts<'_>) -> Rect {
-    let grid = opts.geometry.ascii_layout();
+    let physical = opts.geometry.physical_layout();
     let layer = opts
         .active_layer
         .and_then(|idx| opts.layout.layers.get(idx));
 
-    // Width of one half = widest row of that half.
-    let widest = |rows: &[crate::schema::geometry::GridRow], side: Side| -> usize {
-        rows.iter()
-            .map(|r| match side {
-                Side::Left => r.left.len(),
-                Side::Right => r.right.len(),
-            })
-            .max()
-            .unwrap_or(0)
-    };
-    let left_cols = widest(grid.rows, Side::Left);
-    let right_cols = widest(grid.rows, Side::Right);
-    let half_width = cols_to_px(left_cols.max(right_cols));
-
-    let rows_h = grid.rows.len() as f32 * (KEY_SIZE + ROW_GAP) - ROW_GAP;
-    let thumbs_h = if grid.thumb_clusters.is_empty() {
-        0.0
-    } else {
-        KEY_SIZE + THUMB_SPACING
-    };
-    let total_w = half_width * 2.0 + HALF_GAP;
-    let total_h = rows_h + thumbs_h;
-
     let avail = ui.available_rect_before_wrap();
+
+    // Auto-fit: pick the scale that makes the board fill the
+    // smaller dimension with a small margin. KEY_UNIT_PX is the
+    // "preferred" size; we shrink below it if needed, and never
+    // exceed it (tiny layouts don't balloon to fill a huge window).
+    const MARGIN_PX: f32 = 24.0;
+    let scale_x = (avail.width() - MARGIN_PX) / physical.width;
+    let scale_y = (avail.height() - MARGIN_PX) / (physical.height + BBOX_BOTTOM_PAD);
+    let scale = scale_x.min(scale_y).min(KEY_UNIT_PX).max(16.0);
+
+    let total_w = physical.width * scale;
+    let total_h = physical.height * scale;
     let origin = egui::pos2(
         avail.center().x - total_w / 2.0,
         avail.center().y - total_h / 2.0,
     );
 
     let painter = ui.painter_at(avail);
-
-    // Rows.
     let ctx = ui.ctx().clone();
-    for (row_idx, row) in grid.rows.iter().enumerate() {
-        let y = origin.y + row_idx as f32 * (KEY_SIZE + ROW_GAP);
-        // Right-align the right half against its widest row so the
-        // halves mirror physically when a row is short.
-        let right_offset =
-            origin.x + half_width + HALF_GAP + (half_width - cols_to_px(row.right.len()));
-        draw_row(&ctx, &painter, row.left, origin.x, y, layer, opts);
-        draw_row(&ctx, &painter, row.right, right_offset, y, layer, opts);
-    }
 
-    // Thumb clusters below the main grid.
-    if !grid.thumb_clusters.is_empty() {
-        let thumb_y = origin.y + rows_h + THUMB_SPACING;
-        for cluster in grid.thumb_clusters {
-            let mut x = match cluster.hand {
-                crate::schema::geometry::Hand::Left => {
-                    origin.x + half_width - thumb_cluster_width(cluster)
-                }
-                crate::schema::geometry::Hand::Right => origin.x + half_width + HALF_GAP,
-            };
-            for key in cluster.keys {
-                let w = match key.width {
-                    ThumbKeyWidth::Standard => KEY_SIZE,
-                    ThumbKeyWidth::Wide => KEY_SIZE * 1.5,
-                };
-                let rect = Rect::from_min_size(egui::pos2(x, thumb_y), Vec2::new(w, KEY_SIZE));
-                draw_key(&ctx, &painter, rect, Some(key.index), layer, opts);
-                x += w + KEY_GAP;
-            }
-        }
+    for pk in physical.keys {
+        draw_physical_key(&ctx, &painter, origin, scale, pk, layer, opts);
     }
 
     Rect::from_min_size(origin, Vec2::new(total_w, total_h))
 }
 
-#[derive(Clone, Copy)]
-enum Side {
-    Left,
-    Right,
-}
-
-fn cols_to_px(n: usize) -> f32 {
-    if n == 0 {
-        0.0
-    } else {
-        n as f32 * KEY_SIZE + (n - 1) as f32 * KEY_GAP
-    }
-}
-
-fn thumb_cluster_width(cluster: &crate::schema::geometry::ThumbCluster) -> f32 {
-    let mut w = 0.0;
-    for (i, key) in cluster.keys.iter().enumerate() {
-        if i > 0 {
-            w += KEY_GAP;
-        }
-        w += match key.width {
-            ThumbKeyWidth::Standard => KEY_SIZE,
-            ThumbKeyWidth::Wide => KEY_SIZE * 1.5,
-        };
-    }
-    w
-}
-
-fn draw_row(
+fn draw_physical_key(
     ctx: &Context,
     painter: &egui::Painter,
-    row: &[Option<usize>],
-    start_x: f32,
-    y: f32,
+    origin: Pos2,
+    scale: f32,
+    pk: &PhysicalKey,
     layer: Option<&CanonicalLayer>,
     opts: &RenderOpts<'_>,
 ) {
-    for (col, slot) in row.iter().enumerate() {
-        let x = start_x + col as f32 * (KEY_SIZE + KEY_GAP);
-        let rect = Rect::from_min_size(egui::pos2(x, y), Vec2::splat(KEY_SIZE));
-        draw_key(ctx, painter, rect, *slot, layer, opts);
-    }
-}
+    // Press state dominates highlight state — when the user is actually
+    // pressing a combo-participant, we want to see the press, not the
+    // compositional hint that says "this key is part of a combo".
+    let pressed = opts.pressed.contains(&pk.index);
+    let highlighted = !pressed && opts.highlight.contains(&pk.index);
+    let glow = layer
+        .and_then(|l| l.keys.get(pk.index))
+        .and_then(|k| k.glow_color)
+        .map(rgb_to_color32);
 
-fn draw_key(
-    ctx: &Context,
-    painter: &egui::Painter,
-    rect: Rect,
-    idx: Option<usize>,
-    layer: Option<&CanonicalLayer>,
-    opts: &RenderOpts<'_>,
-) {
-    let Some(i) = idx else { return };
-    let highlighted = opts.highlight.contains(&i);
-    let fill = if highlighted {
+    let fill = if pressed {
+        theme::KEY_PRESSED
+    } else if highlighted {
         theme::KEY_ACCENT
     } else {
         theme::KEY
     };
-    let stroke = Stroke::new(
-        1.0,
-        if highlighted {
-            Color32::WHITE
-        } else {
-            Color32::from_black_alpha(160)
-        },
-    );
-    painter.rect(rect, 6.0, fill, stroke);
+    let stroke_width = if pressed { 1.8 } else { 1.0 };
+    let stroke_color = if pressed || highlighted {
+        Color32::WHITE
+    } else if let Some(c) = glow {
+        // Colored glow only surfaces when the cap isn't already
+        // shouting at the user for a more urgent reason.
+        c
+    } else {
+        Color32::from_black_alpha(160)
+    };
+    let stroke = Stroke::new(stroke_width, stroke_color);
+
+    // Pre-rotation corner positions in pixel space, inset by CAP_FACTOR
+    // so the gutter is automatic regardless of scale.
+    let unit = scale;
+    let cap_w = pk.w * unit * CAP_FACTOR;
+    let cap_h = pk.h * unit * CAP_FACTOR;
+    let inset = (1.0 - CAP_FACTOR) * 0.5;
+    let key_origin_x = origin.x + (pk.x + inset * pk.w) * unit;
+    let key_origin_y = origin.y + (pk.y + inset * pk.h) * unit;
+    let center = Pos2::new(key_origin_x + cap_w / 2.0, key_origin_y + cap_h / 2.0);
 
     let label = layer
-        .and_then(|l| l.keys.get(i))
+        .and_then(|l| l.keys.get(pk.index))
         .map(|k| friendly_key(k, &opts.layout.layers))
         .unwrap_or_default();
-    if !label.is_empty() {
-        let color = if highlighted {
-            Color32::BLACK
-        } else {
-            theme::TEXT
-        };
-        painter.text(
-            rect.center(),
-            Align2::CENTER_CENTER,
-            &label,
-            fit_font(ctx, &label, rect.width()),
-            color,
+    let text_color = if pressed || highlighted {
+        Color32::BLACK
+    } else {
+        theme::TEXT
+    };
+
+    if pk.rot_deg == 0.0 {
+        let rect = Rect::from_min_size(
+            Pos2::new(key_origin_x, key_origin_y),
+            Vec2::new(cap_w, cap_h),
         );
+        // Underlay a soft color halo for keys carrying a glow_color.
+        if let Some(c) = glow {
+            if !pressed && !highlighted {
+                paint_halo_rect(painter, rect, c);
+            }
+        }
+        painter.rect(rect, CAP_CORNER_PX, fill, stroke);
+        if !label.is_empty() {
+            painter.text(
+                center,
+                Align2::CENTER_CENTER,
+                &label,
+                fit_font(ctx, &label, cap_w),
+                text_color,
+            );
+        }
+        return;
     }
+
+    // Rotated cap. Compute the four corners around the pivot, emit a
+    // convex polygon for the cap + a rotated text shape for the label.
+    let pivot = Pos2::new(
+        origin.x + pk.rot_origin_x * unit,
+        origin.y + pk.rot_origin_y * unit,
+    );
+    let theta = pk.rot_deg.to_radians();
+    let rotate = |p: Pos2| -> Pos2 {
+        let dx = p.x - pivot.x;
+        let dy = p.y - pivot.y;
+        let (s, c) = theta.sin_cos();
+        Pos2::new(pivot.x + dx * c - dy * s, pivot.y + dx * s + dy * c)
+    };
+    let tl = Pos2::new(key_origin_x, key_origin_y);
+    let tr = Pos2::new(key_origin_x + cap_w, key_origin_y);
+    let br = Pos2::new(key_origin_x + cap_w, key_origin_y + cap_h);
+    let bl = Pos2::new(key_origin_x, key_origin_y + cap_h);
+    let corners = [rotate(tl), rotate(tr), rotate(br), rotate(bl)];
+
+    if let Some(c) = glow {
+        if !pressed && !highlighted {
+            paint_halo_polygon(painter, &corners, c);
+        }
+    }
+    painter.add(Shape::Path(PathShape::convex_polygon(
+        corners.to_vec(),
+        fill,
+        stroke,
+    )));
+
+    if !label.is_empty() {
+        let rotated_center = rotate(center);
+        let font = fit_font(ctx, &label, cap_w);
+        let galley = ctx.fonts(|f| f.layout_no_wrap(label.clone(), font, text_color));
+        // `TextShape::angle` rotates around `pos`, which is the top-left
+        // of the galley — shift so the rotation pivots around the
+        // visual center instead.
+        let galley_size = galley.size();
+        let offset = Vec2::new(-galley_size.x / 2.0, -galley_size.y / 2.0);
+        let (s, c) = theta.sin_cos();
+        let rotated_offset = Vec2::new(offset.x * c - offset.y * s, offset.x * s + offset.y * c);
+        let mut text_shape = TextShape::new(rotated_center + rotated_offset, galley, text_color);
+        text_shape.angle = theta;
+        painter.add(Shape::Text(text_shape));
+    }
+}
+
+/// A soft colored bloom behind the cap — read as "this key's PCB LED
+/// is set to this color" without competing with the cap fill for
+/// foreground attention.
+fn paint_halo_rect(painter: &egui::Painter, rect: Rect, color: Color32) {
+    let bloom = rect.expand(6.0);
+    let faded = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 90);
+    painter.rect_filled(bloom, CAP_CORNER_PX + 4.0, faded);
+}
+
+fn paint_halo_polygon(painter: &egui::Painter, corners: &[Pos2; 4], color: Color32) {
+    // Extrude each corner outward from the polygon centroid by a
+    // small, scale-agnostic amount. Cheaper than offsetting along
+    // edge normals and visually indistinguishable at this scale.
+    let cx = corners.iter().map(|p| p.x).sum::<f32>() / 4.0;
+    let cy = corners.iter().map(|p| p.y).sum::<f32>() / 4.0;
+    let faded = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 90);
+    let expanded: Vec<Pos2> = corners
+        .iter()
+        .map(|p| {
+            let dx = p.x - cx;
+            let dy = p.y - cy;
+            let len = (dx * dx + dy * dy).sqrt().max(1.0);
+            Pos2::new(p.x + dx / len * 6.0, p.y + dy / len * 6.0)
+        })
+        .collect();
+    painter.add(Shape::Path(PathShape::convex_polygon(
+        expanded,
+        faded,
+        Stroke::NONE,
+    )));
+}
+
+fn rgb_to_color32((r, g, b): (u8, u8, u8)) -> Color32 {
+    Color32::from_rgb(r, g, b)
 }
 
 /// Pick a font size that keeps `label` inside `max_width` (with a small
@@ -210,11 +271,6 @@ fn fit_font(ctx: &Context, label: &str, max_width: f32) -> FontId {
     const PADDING: f32 = 6.0;
     let budget = (max_width - PADDING).max(1.0);
 
-    // Ask egui to lay the label out at `size` and return the width. We
-    // binary-step from DEFAULT down by small increments; in practice
-    // one or two iterations converge, and the worst case is
-    // O((DEFAULT-MIN)/step) ≈ 10 layouts per key, which is well below
-    // the per-frame budget.
     let measure = |size: f32| -> f32 {
         let font = FontId::new(size, FontFamily::Proportional);
         ctx.fonts(|f| {
@@ -227,9 +283,6 @@ fn fit_font(ctx: &Context, label: &str, max_width: f32) -> FontId {
     if measure(DEFAULT) <= budget {
         return FontId::proportional(DEFAULT);
     }
-    // Step down 0.5pt at a time; clamped at MIN. A label that can't
-    // fit even at MIN clips gracefully — that's an extreme-long-label
-    // edge case the layout itself should flag in `lint`.
     let mut size = DEFAULT - 0.5;
     while size > MIN {
         if measure(size) <= budget {

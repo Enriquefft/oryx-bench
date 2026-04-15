@@ -7,6 +7,11 @@ pub const BG: Color32 = Color32::from_rgb(0x12, 0x14, 0x18);
 pub const PANEL: Color32 = Color32::from_rgb(0x1a, 0x1d, 0x23);
 pub const KEY: Color32 = Color32::from_rgb(0x24, 0x29, 0x33);
 pub const KEY_ACCENT: Color32 = Color32::from_rgb(0x3a, 0xa0, 0xff);
+/// Fill for a key the firmware reports as currently held. Warm amber
+/// so it reads as "this physical key is down right now" — distinct
+/// from the cool KEY_ACCENT used for compositional highlights
+/// (combos, next-key hints) the layout might surface later.
+pub const KEY_PRESSED: Color32 = Color32::from_rgb(0xff, 0xc8, 0x57);
 pub const TEXT: Color32 = Color32::from_rgb(0xe6, 0xe8, 0xec);
 pub const MUTED: Color32 = Color32::from_rgb(0x8a, 0x93, 0xa0);
 pub const OK: Color32 = Color32::from_rgb(0x4c, 0xd4, 0x82);

@@ -112,8 +112,28 @@ pub trait Geometry: Send + Sync {
     /// Reverse map.
     fn index_to_position(&self, index: usize) -> Option<&'static str>;
 
+    /// Resolve a firmware-reported electrical matrix coordinate
+    /// (`row`, `col` from QMK's `keyrecord_t`) to the canonical Oryx
+    /// `keys[]` index. Returns `None` for coordinates the physical
+    /// keyboard does not populate (matrix holes).
+    ///
+    /// Ground truth: `keyboards/zsa/<board>/keyboard.json`
+    /// `layouts.LAYOUT.layout[]` — each entry's `matrix: [row, col]`
+    /// pairs with its `label: "k##"` where `##` is the canonical index.
+    /// Raw HID `KEYDOWN`/`KEYUP` events carry these same matrix coords;
+    /// this lookup is the single choke point that turns a transport-layer
+    /// event into something the renderer and any future typing-stats
+    /// consumer can use.
+    fn matrix_to_index(&self, row: u8, col: u8) -> Option<usize>;
+
     /// Layout for the ASCII split-grid renderer.
     fn ascii_layout(&self) -> &'static GridLayout;
+
+    /// Per-key physical positions for the pixel-accurate GUI renderer
+    /// (`src/watch/gui/layout_view.rs`). Columnar stagger, split gap,
+    /// and angled thumb clusters all live in this description — the
+    /// renderer itself is geometry-agnostic.
+    fn physical_layout(&self) -> &'static PhysicalLayout;
 
     /// QMK keyboard target name (e.g., "zsa/voyager").
     fn qmk_keyboard(&self) -> &'static str;
@@ -203,6 +223,48 @@ pub struct GridRow {
 pub struct ThumbCluster {
     pub hand: Hand,
     pub keys: &'static [ThumbKey],
+}
+
+/// A single physical key cap: where it sits in 1u grid space, how big,
+/// and whether the cluster it belongs to is cosmetically rotated. The
+/// GUI renderer (`src/watch/gui/layout_view.rs`) consumes this to draw
+/// a 1:1 picture of the physical board — columnar stagger, angled
+/// thumbs, split gap all fall out of the (x, y, rotation) tuple.
+///
+/// Units are **1u** (one standard key width). Positions are the
+/// **top-left corner** of the cap; rotation is clockwise degrees
+/// around (`rot_origin_x`, `rot_origin_y`). Using top-left (not center)
+/// matches the convention QMK's `keyboard.json` uses, so ground-truth
+/// transcription is copy-paste.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PhysicalKey {
+    /// Canonical Oryx `keys[]` index this physical cap corresponds to.
+    pub index: usize,
+    /// Top-left X in 1u units.
+    pub x: f32,
+    /// Top-left Y in 1u units.
+    pub y: f32,
+    /// Width in 1u units (1.0 = standard cap).
+    pub w: f32,
+    /// Height in 1u units.
+    pub h: f32,
+    /// Clockwise rotation in degrees around (`rot_origin_x`,
+    /// `rot_origin_y`). `0.0` for the flat main grid; non-zero for
+    /// angled thumb clusters on Voyager / Moonlander.
+    pub rot_deg: f32,
+    /// Rotation pivot in 1u units. Ignored when `rot_deg == 0.0`.
+    pub rot_origin_x: f32,
+    /// Rotation pivot in 1u units. Ignored when `rot_deg == 0.0`.
+    pub rot_origin_y: f32,
+}
+
+/// A complete physical-layout description: every key, plus the bounding
+/// box the renderer uses to auto-fit to the window. `width` / `height`
+/// are in 1u units and include any split gap and cosmetic rotations.
+pub struct PhysicalLayout {
+    pub keys: &'static [PhysicalKey],
+    pub width: f32,
+    pub height: f32,
 }
 
 static REGISTRY: Lazy<HashMap<&'static str, &'static dyn Geometry>> = Lazy::new(|| {

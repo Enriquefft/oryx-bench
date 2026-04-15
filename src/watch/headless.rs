@@ -135,6 +135,11 @@ pub fn run_layer_stream(
                     Some(WatchEvent::Idle) => {
                         // Reader thread never forwards Idle; defensive arm.
                     }
+                    Some(WatchEvent::KeyDown { .. } | WatchEvent::KeyUp { .. }) => {
+                        // `--layer-only` is explicitly scoped to layer
+                        // transitions; a live keystroke stream would
+                        // spam stdout and break grep-based scripts.
+                    }
                     Some(WatchEvent::Disconnected) | None => {
                         info!("device disconnected; reconnecting");
                         last_layer = None;
@@ -196,6 +201,11 @@ pub(crate) fn set_layer_on_client(
                 tracing::debug!(got = other, want = layer, "ignoring stale LAYER event");
             }
             WatchEvent::Idle => {}
+            WatchEvent::KeyDown { .. } | WatchEvent::KeyUp { .. } => {
+                // The user typing during a set-layer confirmation is
+                // orthogonal to whether the lock landed — keep waiting
+                // for the LAYER echo.
+            }
             WatchEvent::Error(msg) => return Ok(SetLayerOutcome::DeviceError(msg)),
             WatchEvent::Disconnected => return Ok(SetLayerOutcome::Disconnected),
         }

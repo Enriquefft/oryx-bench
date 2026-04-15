@@ -350,6 +350,13 @@ pub enum Event {
 pub enum WatchEvent {
     /// Firmware reported a new active layer index.
     LayerChanged(u8),
+    /// A physical key was pressed. Coordinates are the electrical
+    /// matrix position from QMK's `keyrecord_t.event.key`; consumers
+    /// resolve to a canonical index via
+    /// `Geometry::matrix_to_index(row, col)`.
+    KeyDown { row: u8, col: u8 },
+    /// A physical key was released. Coordinates as `KeyDown`.
+    KeyUp { row: u8, col: u8 },
     /// Device sent an error frame. `String` is a human-readable
     /// description (we keep the raw code too for logs).
     Error(String),
@@ -373,7 +380,7 @@ pub enum HidOpenError {
     )]
     PermissionDenied { path: String },
     #[error(
-        "keyboard responded on USB but does not speak the Oryx HID protocol. your firmware is missing the handler — rebuild with COMMUNITY_MODULES += oryx, RAW_ENABLE = yes, and RGB_MATRIX_ENABLE = yes (or use the stock ZSA firmware)"
+        "keyboard responded on USB but does not speak the Oryx HID protocol. your firmware is missing the handler — rebuild with ORYX_ENABLE = yes, RAW_ENABLE = yes, and RGB_MATRIX_ENABLE = yes (or use the stock ZSA firmware)"
     )]
     FirmwareHandlerMissing,
     #[error("failed to open {path}: {source}")]
@@ -721,11 +728,10 @@ impl Client {
 fn classify(event: Event) -> WatchEvent {
     match event {
         Event::LayerChanged(l) => WatchEvent::LayerChanged(l),
+        Event::KeyDown { col, row } => WatchEvent::KeyDown { row, col },
+        Event::KeyUp { col, row } => WatchEvent::KeyUp { row, col },
         Event::Error { code } => WatchEvent::Error(format!("firmware error 0x{code:02X}")),
-        // Keydown/up are Phase 2+ consumers; accept and drop cleanly.
-        Event::KeyDown { .. }
-        | Event::KeyUp { .. }
-        | Event::Unknown { .. }
+        Event::Unknown { .. }
         | Event::PairingSuccess
         | Event::ProtocolVersion(_)
         | Event::FirmwareVersion(_) => WatchEvent::Idle,
@@ -1215,11 +1221,18 @@ mod tests {
     #[test]
     fn classify_drops_non_user_events() {
         assert_eq!(classify(Event::PairingSuccess), WatchEvent::Idle);
+    }
+
+    #[test]
+    fn classify_propagates_key_events() {
         assert_eq!(
-            classify(Event::KeyDown { col: 0, row: 0 }),
-            WatchEvent::Idle
+            classify(Event::KeyDown { col: 3, row: 5 }),
+            WatchEvent::KeyDown { row: 5, col: 3 }
         );
-        assert_eq!(classify(Event::KeyUp { col: 0, row: 0 }), WatchEvent::Idle);
+        assert_eq!(
+            classify(Event::KeyUp { col: 3, row: 5 }),
+            WatchEvent::KeyUp { row: 5, col: 3 }
+        );
     }
 
     #[test]

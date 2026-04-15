@@ -40,6 +40,13 @@ struct Shared {
     snapshot: ArcSwap<Option<Snapshot>>,
     conn: ArcSwap<ConnState>,
     last_update: ArcSwap<Option<Instant>>,
+    /// Currently-pressed electrical matrix coordinates, updated from
+    /// KEYDOWN/KEYUP. Stored as raw `(row, col)` because the firmware
+    /// speaks matrix coords; the renderer resolves to canonical index
+    /// via `Geometry::matrix_to_index`. Small enough (≤ 52 entries on
+    /// the Voyager, strictly NKRO-bounded) that an `ArcSwap<Vec>` with
+    /// load-clone-mutate-store beats a mutex on the draw path.
+    pressed: ArcSwap<Vec<(u8, u8)>>,
     /// Current command sender, if the pump is live. `None` during
     /// (re)connect. Swapped in atomically when a handshake completes;
     /// swapped back to `None` when the pump exits. The draw thread
@@ -61,6 +68,7 @@ impl Default for Shared {
             snapshot: ArcSwap::from_pointee(None),
             conn: ArcSwap::from_pointee(ConnState::default()),
             last_update: ArcSwap::from_pointee(None),
+            pressed: ArcSwap::from_pointee(Vec::new()),
             command: ArcSwap::from_pointee(None),
             shutdown: Notify::new(),
             shutdown_flag: AtomicBool::new(false),
@@ -122,8 +130,10 @@ impl eframe::App for App {
 
         // The HID task pushes fresh state into `shared`; ask egui to
         // repaint on a timer so we pick up events without needing the
-        // reader to poke the context directly.
-        ctx.request_repaint_after(Duration::from_millis(80));
+        // reader to poke the context directly. 33ms ≈ 30fps — key
+        // press/release flashes feel instant at this cadence; any
+        // longer and short taps alias past a single frame.
+        ctx.request_repaint_after(Duration::from_millis(33));
 
         let snapshot_guard = self.shared.snapshot.load();
         let snapshot: Option<&Snapshot> = snapshot_guard.as_ref().as_ref();
@@ -131,6 +141,8 @@ impl eframe::App for App {
         let last = **self.shared.last_update.load();
         let command_guard = self.shared.command.load();
         let command: Option<&CommandSender> = command_guard.as_ref().as_ref();
+        let pressed_guard = self.shared.pressed.load();
+        let pressed: &[(u8, u8)] = pressed_guard.as_slice();
 
         // Keyboard shortcuts: digits 0..=9 lock that layer; Esc releases
         // the currently-displayed layer's lock. Shortcut dispatch runs
@@ -147,6 +159,7 @@ impl eframe::App for App {
             &conn,
             last,
             command,
+            pressed,
         );
     }
 
@@ -166,6 +179,9 @@ fn spawn_hid_task(rt: &tokio::runtime::Runtime, shared: Arc<Shared>, opts: Conne
         loop {
             shared.conn.store(Arc::new(ConnState::Connecting));
             shared.command.store(Arc::new(None));
+            // Drop stale pressed keys so a disconnect mid-press doesn't
+            // leave a ghost highlight after reconnect.
+            shared.pressed.store(Arc::new(Vec::new()));
 
             let open_shared = Arc::clone(&shared);
             let open_opts = opts.clone();
@@ -330,6 +346,20 @@ fn open_and_pump(
                     ..current
                 };
                 shared.snapshot.store(Arc::new(Some(next)));
+                shared.last_update.store(Arc::new(Some(Instant::now())));
+            }
+            Ok(WatchEvent::KeyDown { row, col }) => {
+                let mut next = (**shared.pressed.load()).clone();
+                if !next.iter().any(|&k| k == (row, col)) {
+                    next.push((row, col));
+                }
+                shared.pressed.store(Arc::new(next));
+                shared.last_update.store(Arc::new(Some(Instant::now())));
+            }
+            Ok(WatchEvent::KeyUp { row, col }) => {
+                let mut next = (**shared.pressed.load()).clone();
+                next.retain(|&k| k != (row, col));
+                shared.pressed.store(Arc::new(next));
                 shared.last_update.store(Arc::new(Some(Instant::now())));
             }
             Ok(WatchEvent::Error(msg)) => {

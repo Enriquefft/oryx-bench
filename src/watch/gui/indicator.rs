@@ -25,6 +25,7 @@ pub fn draw(
     conn: &ConnState,
     last_update: Option<Instant>,
     command: Option<&CommandSender>,
+    pressed: &[(u8, u8)],
 ) {
     egui::TopBottomPanel::top("watch-header")
         .exact_height(56.0)
@@ -61,6 +62,13 @@ pub fn draw(
                 Some(i) => usize::try_from(i).ok(),
                 None => (!layout.layers.is_empty()).then_some(0),
             };
+            // Resolve firmware matrix coords into canonical indices via
+            // the geometry. Unknown coords (matrix holes, foreign board)
+            // are dropped — never guess.
+            let pressed_indices: Vec<usize> = pressed
+                .iter()
+                .filter_map(|&(row, col)| geometry.matrix_to_index(row, col))
+                .collect();
             let _rect = layout_view::draw(
                 ui,
                 &RenderOpts {
@@ -68,6 +76,7 @@ pub fn draw(
                     geometry,
                     active_layer: active,
                     highlight: &[],
+                    pressed: &pressed_indices,
                 },
             );
         });

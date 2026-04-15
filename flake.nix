@@ -218,9 +218,13 @@
               pkgs.lefthook
             ];
 
-            # Keep target/ out of the Nix store to allow incremental builds.
+            # Keep target/ outside the source tree. It must live outside
+            # $PWD or `nix flake update` on downstream path: inputs copies
+            # the whole target/ (multi-GB) into the store before any
+            # gitignore/crane filter runs.
             shellHook = ''
-              export CARGO_TARGET_DIR="$PWD/target"
+              export CARGO_TARGET_DIR="''${XDG_CACHE_HOME:-$HOME/.cache}/oryx-bench/target"
+              mkdir -p "$CARGO_TARGET_DIR"
               : "''${RUST_LOG:=warn}"
               export RUST_LOG
               # Single source of truth for the runtime-linked lib set

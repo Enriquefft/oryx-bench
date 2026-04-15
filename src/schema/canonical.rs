@@ -58,6 +58,13 @@ pub struct CanonicalKey {
     pub tapping_term: Option<u32>,
     #[serde(default)]
     pub custom_label: Option<String>,
+    /// Per-key RGB "glow" color assigned by the user in Oryx. Parsed
+    /// from the `glowColor` hex string (`#rrggbb` or `rrggbb`) into a
+    /// raw RGB tuple so the GUI renderer doesn't re-parse per frame,
+    /// and so local-mode layouts round-trip the same way.
+    /// `None` means the firmware's RGB matrix default applies.
+    #[serde(default)]
+    pub glow_color: Option<(u8, u8, u8)>,
 }
 
 /// Highest valid `n` for a `CanonicalAction::Custom(n)` slot.
@@ -569,6 +576,35 @@ fn oryx_key_to_canonical(k: &oryx::Key) -> CanonicalKey {
         tap_hold,
         tapping_term: k.tapping_term,
         custom_label: k.custom_label.clone(),
+        glow_color: k.glow_color.as_deref().and_then(parse_hex_color),
+    }
+}
+
+/// Parse `#rrggbb` / `rrggbb` / `#rgb` / `rgb` into an RGB triple.
+/// Returns `None` for any other shape — Oryx's server has been seen to
+/// emit both four-digit variants and the occasional HSL string;
+/// silently dropping an unparseable value keeps rendering fail-safe
+/// (the key falls back to the default cap color). The parser is
+/// deliberately strict on digit count to avoid accepting malformed
+/// values that happen to start with six hex characters.
+fn parse_hex_color(raw: &str) -> Option<(u8, u8, u8)> {
+    let s = raw.trim().trim_start_matches('#');
+    let parse = |h: &str| u8::from_str_radix(h, 16).ok();
+    match s.len() {
+        6 => {
+            let r = parse(&s[0..2])?;
+            let g = parse(&s[2..4])?;
+            let b = parse(&s[4..6])?;
+            Some((r, g, b))
+        }
+        3 => {
+            // Short form #rgb = #rrggbb with each nibble doubled.
+            let r = parse(&s[0..1])?;
+            let g = parse(&s[1..2])?;
+            let b = parse(&s[2..3])?;
+            Some((r * 17, g * 17, b * 17))
+        }
+        _ => None,
     }
 }
 
@@ -895,6 +931,26 @@ fn base_action_from_oryx(a: &oryx::Action) -> CanonicalAction {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_hex_color_full_six_digit() {
+        assert_eq!(parse_hex_color("#3aa0ff"), Some((0x3a, 0xa0, 0xff)));
+        assert_eq!(parse_hex_color("3aa0ff"), Some((0x3a, 0xa0, 0xff)));
+    }
+
+    #[test]
+    fn parses_hex_color_short_three_digit() {
+        // #abc expands to #aabbcc; each nibble is duplicated.
+        assert_eq!(parse_hex_color("#abc"), Some((0xaa, 0xbb, 0xcc)));
+    }
+
+    #[test]
+    fn rejects_malformed_hex_colors() {
+        assert_eq!(parse_hex_color(""), None);
+        assert_eq!(parse_hex_color("#gggggg"), None);
+        assert_eq!(parse_hex_color("#3aa0f"), None);
+        assert_eq!(parse_hex_color("hsl(180, 50%, 50%)"), None);
+    }
 
     #[test]
     fn converts_fixture_to_canonical() {

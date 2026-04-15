@@ -33,7 +33,10 @@
 //! Verified by reading `examples/voyager-dvorak/pulled/revision.json`
 //! and the QMK fork's `keyboards/zsa/voyager/keyboard.json`.
 
-use super::{Geometry, GridLayout, GridRow, Hand, ThumbCluster, ThumbKey, ThumbKeyWidth};
+use super::{
+    Geometry, GridLayout, GridRow, Hand, PhysicalKey, PhysicalLayout, ThumbCluster, ThumbKey,
+    ThumbKeyWidth,
+};
 
 pub struct Voyager;
 
@@ -68,8 +71,19 @@ impl Geometry for Voyager {
             .map(|(n, _)| *n)
     }
 
+    fn matrix_to_index(&self, row: u8, col: u8) -> Option<usize> {
+        MATRIX_TABLE
+            .iter()
+            .find(|(r, c, _)| *r == row && *c == col)
+            .map(|(_, _, idx)| *idx)
+    }
+
     fn ascii_layout(&self) -> &'static GridLayout {
         &GRID
+    }
+
+    fn physical_layout(&self) -> &'static PhysicalLayout {
+        &PHYSICAL
     }
 
     fn qmk_keyboard(&self) -> &'static str {
@@ -247,6 +261,43 @@ const POSITION_TABLE: &[(&str, usize)] = &[
 ];
 
 // =============================================================================
+// Electrical matrix → canonical index
+// =============================================================================
+//
+// Verbatim transcription of `keyboards/zsa/voyager/keyboard.json`
+// `layouts.LAYOUT.layout[]`: each entry's `matrix: [row, col]` pairs
+// with its `label: "k##"` where `##` is the canonical Oryx `keys[]`
+// index. The firmware raw HID `KEYDOWN` / `KEYUP` events carry the
+// same (row, col) pair that QMK stores in `keyrecord_t.event.key`, so
+// this table is the lookup every UI / stats consumer goes through.
+//
+// The Voyager's scan matrix is 12 rows × 7 cols; only the entries below
+// are populated (the rest are matrix holes — ROW2COL diodes do not
+// bridge a key there).
+#[rustfmt::skip]
+const MATRIX_TABLE: &[(u8, u8, usize)] = &[
+    // ── Left half rows ──────────────────────────────────────────────
+    (0, 1,  0), (0, 2,  1), (0, 3,  2), (0, 4,  3), (0, 5,  4), (0, 6,  5),
+    (1, 1,  6), (1, 2,  7), (1, 3,  8), (1, 4,  9), (1, 5, 10), (1, 6, 11),
+    (2, 1, 12), (2, 2, 13), (2, 3, 14), (2, 4, 15), (2, 5, 16), (2, 6, 17),
+    (3, 1, 18), (3, 2, 19), (3, 3, 20), (3, 4, 21), (3, 5, 22),
+    (4, 4, 23),
+
+    // ── Left thumb cluster ──────────────────────────────────────────
+    (5, 0, 24), (5, 1, 25),
+
+    // ── Right half rows ─────────────────────────────────────────────
+    (6, 0, 26), (6, 1, 27), (6, 2, 28), (6, 3, 29), (6, 4, 30), (6, 5, 31),
+    (7, 0, 32), (7, 1, 33), (7, 2, 34), (7, 3, 35), (7, 4, 36), (7, 5, 37),
+    (8, 0, 38), (8, 1, 39), (8, 2, 40), (8, 3, 41), (8, 4, 42), (8, 5, 43),
+    (10, 2, 44),
+    (9, 1, 45), (9, 2, 46), (9, 3, 47), (9, 4, 48), (9, 5, 49),
+
+    // ── Right thumb cluster ─────────────────────────────────────────
+    (11, 5, 50), (11, 6, 51),
+];
+
+// =============================================================================
 // QMK LAYOUT_voyager argument order
 // =============================================================================
 //
@@ -375,6 +426,82 @@ const GRID: GridLayout = GridLayout {
     thumb_clusters: THUMBS,
 };
 
+// =============================================================================
+// Physical layout (pixel-accurate GUI)
+// =============================================================================
+//
+// Per-key (x, y) top-left corners are transcribed verbatim from
+// `keyboards/zsa/voyager/keyboard.json` `layouts.LAYOUT.layout[]` —
+// the same array we used to build `MATRIX_TABLE` above. The JSON does
+// **not** include thumb-cluster rotation (it's a cosmetic Oryx/web
+// convention, not a matrix fact), so we add it here: each thumb pair
+// rotates outward around its inner corner, matching the angle every
+// ZSA-authored render of the Voyager uses.
+//
+// Widths default to 1u; the real thumb caps are physically ~1.25u, but
+// using 1u here keeps the rendered halves symmetric against the grid
+// and matches the keyboard.json footprint exactly.
+
+const THUMB_ROT_DEG: f32 = 20.0;
+
+#[rustfmt::skip]
+const PHYSICAL_KEYS: &[PhysicalKey] = &[
+    // ── Left half, rows 0..3 ────────────────────────────────────────
+    pk(0,  0.0, 0.50), pk(1,  1.0, 0.50), pk(2,  2.0, 0.25), pk(3,  3.0, 0.00), pk(4,  4.0, 0.25), pk(5,  5.0, 0.50),
+    pk(6,  0.0, 1.50), pk(7,  1.0, 1.50), pk(8,  2.0, 1.25), pk(9,  3.0, 1.00), pk(10, 4.0, 1.25), pk(11, 5.0, 1.50),
+    pk(12, 0.0, 2.50), pk(13, 1.0, 2.50), pk(14, 2.0, 2.25), pk(15, 3.0, 2.00), pk(16, 4.0, 2.25), pk(17, 5.0, 2.50),
+    pk(18, 0.0, 3.50), pk(19, 1.0, 3.50), pk(20, 2.0, 3.25), pk(21, 3.0, 3.00), pk(22, 4.0, 3.25), pk(23, 5.0, 3.50),
+
+    // ── Left thumb cluster (rotated outward around (5, 4.5)) ────────
+    pk_rot(24, 5.0, 4.50,  THUMB_ROT_DEG, 5.0, 4.5),
+    pk_rot(25, 6.0, 4.75,  THUMB_ROT_DEG, 5.0, 4.5),
+
+    // ── Right half, rows 0..3 ───────────────────────────────────────
+    pk(26, 10.0, 0.50), pk(27, 11.0, 0.25), pk(28, 12.0, 0.00), pk(29, 13.0, 0.25), pk(30, 14.0, 0.50), pk(31, 15.0, 0.50),
+    pk(32, 10.0, 1.50), pk(33, 11.0, 1.25), pk(34, 12.0, 1.00), pk(35, 13.0, 1.25), pk(36, 14.0, 1.50), pk(37, 15.0, 1.50),
+    pk(38, 10.0, 2.50), pk(39, 11.0, 2.25), pk(40, 12.0, 2.00), pk(41, 13.0, 2.25), pk(42, 14.0, 2.50), pk(43, 15.0, 2.50),
+    pk(44, 10.0, 3.50), pk(45, 11.0, 3.25), pk(46, 12.0, 3.00), pk(47, 13.0, 3.25), pk(48, 14.0, 3.50), pk(49, 15.0, 3.50),
+
+    // ── Right thumb cluster (rotated outward around (11, 4.5)) ──────
+    pk_rot(50,  9.0, 4.75, -THUMB_ROT_DEG, 11.0, 4.5),
+    pk_rot(51, 10.0, 4.50, -THUMB_ROT_DEG, 11.0, 4.5),
+];
+
+const fn pk(index: usize, x: f32, y: f32) -> PhysicalKey {
+    PhysicalKey {
+        index,
+        x,
+        y,
+        w: 1.0,
+        h: 1.0,
+        rot_deg: 0.0,
+        rot_origin_x: 0.0,
+        rot_origin_y: 0.0,
+    }
+}
+
+const fn pk_rot(index: usize, x: f32, y: f32, rot_deg: f32, rx: f32, ry: f32) -> PhysicalKey {
+    PhysicalKey {
+        index,
+        x,
+        y,
+        w: 1.0,
+        h: 1.0,
+        rot_deg,
+        rot_origin_x: rx,
+        rot_origin_y: ry,
+    }
+}
+
+// The bbox is generous by ~1u below the thumbs so the rotated thumb
+// caps don't clip the viewport — a rotation of 20° around (5, 4.5)
+// pushes the outer corner of (6, 4.75) down to ≈y 5.9.
+const PHYSICAL: PhysicalLayout = PhysicalLayout {
+    keys: PHYSICAL_KEYS,
+    width: 16.0,
+    height: 6.0,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -460,6 +587,41 @@ mod tests {
         // R thumb (QMK 50..52 = canonical 50..52, identity).
         assert_eq!(QMK_ARG_ORDER[50], 50);
         assert_eq!(QMK_ARG_ORDER[51], 51);
+    }
+
+    #[test]
+    fn matrix_table_covers_every_canonical_index() {
+        // The firmware HID KEYDOWN path depends on this being a total
+        // map: every canonical index 0..52 must be reachable from
+        // exactly one (row, col) pair, otherwise a press on the
+        // unmapped key silently goes un-highlighted.
+        let mut seen = [false; 52];
+        for (_, _, idx) in MATRIX_TABLE.iter() {
+            assert!(*idx < 52, "matrix entry has out-of-range index {idx}");
+            assert!(!seen[*idx], "canonical index {idx} appears twice");
+            seen[*idx] = true;
+        }
+        assert!(
+            seen.iter().all(|&b| b),
+            "matrix table missing some canonical index"
+        );
+        assert_eq!(MATRIX_TABLE.len(), Voyager.matrix_key_count());
+    }
+
+    #[test]
+    fn matrix_to_index_pins_known_coords() {
+        // keyboard.json fixture: top-left on left half.
+        assert_eq!(Voyager.matrix_to_index(0, 1), Some(0));
+        // Thumb cluster — verified against keyboard.json.
+        assert_eq!(Voyager.matrix_to_index(5, 0), Some(24));
+        assert_eq!(Voyager.matrix_to_index(5, 1), Some(25));
+        assert_eq!(Voyager.matrix_to_index(11, 5), Some(50));
+        assert_eq!(Voyager.matrix_to_index(11, 6), Some(51));
+        // Matrix hole — not wired.
+        assert_eq!(Voyager.matrix_to_index(0, 0), None);
+        // Out-of-matrix coordinates.
+        assert_eq!(Voyager.matrix_to_index(12, 0), None);
+        assert_eq!(Voyager.matrix_to_index(0, 7), None);
     }
 
     /// Pin the position table against the real Oryx fixture so a future

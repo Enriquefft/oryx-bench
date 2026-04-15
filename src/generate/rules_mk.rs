@@ -30,10 +30,13 @@ use crate::schema::features::FeaturesToml;
 /// The firmware only answers that protocol when all three are enabled:
 ///
 /// - `RAW_ENABLE = yes` — the raw HID endpoint itself.
-/// - `COMMUNITY_MODULES += oryx` — the Oryx HID message handler (the
-///   one that responds to our `GetStatus`/`SetLayer` messages).
-/// - `RGB_MATRIX_ENABLE = yes` — the Oryx module's `keymap_callbacks.c`
-///   references the RGB matrix layer API; without it the module fails
+/// - `ORYX_ENABLE = yes` — the Oryx HID message handler (the one that
+///   responds to our `GetStatus`/`SetLayer` messages). Processed by
+///   `keyboards/zsa/common/features.mk` in ZSA's qmk_firmware fork; it
+///   expands to `-DORYX_ENABLE -DORYX_CONFIGURATOR` and links the
+///   handler sources from `keyboards/zsa/common/`.
+/// - `RGB_MATRIX_ENABLE = yes` — the Oryx handler's `keymap_callbacks.c`
+///   references the RGB matrix layer API; without it the build fails
 ///   to link.
 ///
 /// Every firmware built by `oryx-bench build` must carry these. They
@@ -48,7 +51,7 @@ use crate::schema::features::FeaturesToml;
 pub const WATCH_REQUIRED_RULES_MK: &[(&str, &str)] = &[
     ("RAW_ENABLE", "yes"),
     ("RGB_MATRIX_ENABLE", "yes"),
-    ("COMMUNITY_MODULES", "+= oryx"),
+    ("ORYX_ENABLE", "yes"),
 ];
 
 /// Emit the additive `rules.mk` body.
@@ -60,7 +63,7 @@ pub fn emit_rules_mk(
     // Refuse to generate firmware that `oryx-bench watch` cannot talk
     // to. `rgb_matrix = false` in `[features]` would override the
     // `RGB_MATRIX_ENABLE = yes` we inject below and silently break
-    // `watch`. `RAW_ENABLE` and `COMMUNITY_MODULES` are not reachable
+    // `watch`. `RAW_ENABLE` and `ORYX_ENABLE` are not reachable
     // from `[features]` at all — the schema has no toggle for them —
     // so the hard rejection path is only needed for `rgb_matrix`. We
     // error (rather than warn-and-override) because the user has told
@@ -90,14 +93,7 @@ pub fn emit_rules_mk(
     out.push_str("# keyboard's live layer state over raw HID. Do not remove — watch\n");
     out.push_str("# will error out at handshake time if any of these are missing.\n");
     for (name, value) in WATCH_REQUIRED_RULES_MK {
-        // `COMMUNITY_MODULES` uses `+=` (append to any upstream list);
-        // the plain `yes`/`no` flags use `=`. The value string carries
-        // the operator so this stays data-driven.
-        if value.starts_with("+=") || value.starts_with('=') {
-            let _ = writeln!(out, "{name} {value}");
-        } else {
-            let _ = writeln!(out, "{name} = {value}");
-        }
+        let _ = writeln!(out, "{name} = {value}");
     }
     out.push('\n');
 
@@ -242,8 +238,8 @@ mod tests {
             "missing RGB_MATRIX_ENABLE in:\n{out}"
         );
         assert!(
-            out.contains("COMMUNITY_MODULES += oryx"),
-            "missing COMMUNITY_MODULES += oryx in:\n{out}"
+            out.contains("ORYX_ENABLE = yes"),
+            "missing ORYX_ENABLE = yes in:\n{out}"
         );
         // The rationale comment must ship with the flags so a user
         // inspecting the generated rules.mk understands why they're
