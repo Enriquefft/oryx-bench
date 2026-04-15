@@ -245,6 +245,19 @@ fn keymap_c_is_parseable_by_qmk_when_available() {
         eprintln!("skip: `qmk` not on PATH (install qmk to enable the c2json check)");
         return;
     }
+    // `c2json` landed in qmk_cli 1.1.6; older builds shipped in some
+    // distros (nixpkgs' qmk 1.2.0 among them, despite the version
+    // number) don't expose it. Probe before invoking so the test
+    // skips cleanly on those hosts instead of failing with an
+    // "invalid choice" argparse error.
+    let probe = Command::new("qmk").args(["c2json", "--help"]).output();
+    match probe {
+        Ok(out) if out.status.success() => {}
+        _ => {
+            eprintln!("skip: `qmk c2json` subcommand unavailable on this host");
+            return;
+        }
+    }
 
     let canonical = load_fixture();
     let geom = geometry::get("voyager").unwrap();
