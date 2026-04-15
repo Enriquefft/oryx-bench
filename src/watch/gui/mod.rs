@@ -350,7 +350,7 @@ fn open_and_pump(
             }
             Ok(WatchEvent::KeyDown { row, col }) => {
                 let mut next = (**shared.pressed.load()).clone();
-                if !next.iter().any(|&k| k == (row, col)) {
+                if !next.contains(&(row, col)) {
                     next.push((row, col));
                 }
                 shared.pressed.store(Arc::new(next));

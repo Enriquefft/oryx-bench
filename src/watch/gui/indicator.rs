@@ -17,6 +17,7 @@ use super::ConnState;
 use crate::watch::hid::{Command, CommandSender};
 use crate::watch::Snapshot;
 
+#[allow(clippy::too_many_arguments)]
 pub fn draw(
     ctx: &Context,
     layout: &CanonicalLayout,

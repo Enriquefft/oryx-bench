@@ -72,7 +72,7 @@ pub fn draw(ui: &mut Ui, opts: &RenderOpts<'_>) -> Rect {
     const MARGIN_PX: f32 = 24.0;
     let scale_x = (avail.width() - MARGIN_PX) / physical.width;
     let scale_y = (avail.height() - MARGIN_PX) / (physical.height + BBOX_BOTTOM_PAD);
-    let scale = scale_x.min(scale_y).min(KEY_UNIT_PX).max(16.0);
+    let scale = scale_x.min(scale_y).clamp(16.0, KEY_UNIT_PX);
 
     let total_w = physical.width * scale;
     let total_h = physical.height * scale;
